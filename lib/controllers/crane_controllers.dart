@@ -25,6 +25,7 @@ class CraneController extends ChangeNotifier {
   StreamSubscription<BluetoothAdapterState>? _adapterSubscription;
 
   BleConnectionState _transportConnState = BleConnectionState.initial();
+  BleConnectionStatus _lastConnectionStatus = BleConnectionStatus.disconnected;
   List<BleScanDevice> _devices = const [];
   Map<String, int> _analogValues = {};
   PlcOutputCommand _activeCommand = PlcOutputCommand.idle();
@@ -43,6 +44,7 @@ class CraneController extends ChangeNotifier {
   bool _permissionBannerDismissed = false;
   bool _rememberCredentials = true;
   bool _estopLatched = false;
+  bool _startupEmergencyArmedForConnection = false;
   String? _sessionEmail;
   String? _errorMessage;
   String _savedEmail = '';
@@ -105,7 +107,7 @@ class CraneController extends ChangeNotifier {
   int get a2 => _analogValues['A2'] ?? 0;
 
   // ── LED indicator states (sourced from PLC) ───────────────────────────────
-  bool get ledEstop => _activeCommand.estop;
+  bool get ledEstop => _estopLatched || _activeCommand.estop;
   bool get ledUp =>
       _activeCommand.direction == HoistDirection.up && !_activeCommand.estop;
   bool get ledDown =>
@@ -332,12 +334,18 @@ class CraneController extends ChangeNotifier {
     _streamsAttached = true;
 
     _connStateSubscription = _bleService.connectionStream.listen((snapshot) {
+      final previousStatus = _lastConnectionStatus;
+      _lastConnectionStatus = snapshot.status;
       _transportConnState = snapshot;
       if (snapshot.status == BleConnectionStatus.disconnected) {
         _clearDirectionalHolds(notify: false);
         _activeCommand = PlcOutputCommand.idle();
         _estopLatched = false;
+        _startupEmergencyArmedForConnection = false;
         _sessionEmail = null;
+      } else if (snapshot.status == BleConnectionStatus.authenticated &&
+          previousStatus != BleConnectionStatus.authenticated) {
+        unawaited(ensureControlEntryEmergencyLock());
       }
       notifyListeners();
     });
@@ -354,7 +362,9 @@ class CraneController extends ChangeNotifier {
 
     _statusSubscription = _bleService.statusStream.listen((command) {
       _activeCommand = command;
-      _estopLatched = command.estop;
+      if (command.estop) {
+        _estopLatched = true;
+      }
       notifyListeners();
     });
 
@@ -543,6 +553,12 @@ class CraneController extends ChangeNotifier {
     _estopLatched = false;
     _clearDirectionalHolds(notify: false);
     await _sendCommand(PlcOutputCommand.idle());
+  }
+
+  Future<void> ensureControlEntryEmergencyLock() async {
+    if (!isConnected || _startupEmergencyArmedForConnection) return;
+    _startupEmergencyArmedForConnection = true;
+    await triggerEStop();
   }
 
   Future<void> _recomputeDirectionalCommandAndSend({required bool fast}) async {

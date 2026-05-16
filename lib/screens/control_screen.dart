@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dart:async';
 import 'package:provider/provider.dart';
 import 'package:vibration/vibration.dart';
 
@@ -51,6 +52,7 @@ class _ControlScreenState extends State<ControlScreen>
       final controller = context.read<CraneController>();
       _craneController = controller;
       controller.addListener(_onControllerChange);
+      unawaited(controller.ensureControlEntryEmergencyLock());
     });
   }
 
@@ -446,7 +448,7 @@ class _ControlScreenState extends State<ControlScreen>
     
     if (controller.estopLatched) {
       c = AppColors.eStopColor;
-      status = 'EMERGENCY STOP';
+      status = 'EMERGENCY ACTIVE - SYSTEM LOCKED';
     } else if (controller.upHoldActive) {
       c = AppColors.upColor;
       status = 'HOISTING UP — HOLD TO RUN';
