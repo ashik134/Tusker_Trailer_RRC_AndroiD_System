@@ -277,7 +277,8 @@ class _HeroStatusCard extends StatelessWidget {
         border: ConnectionColors.scanningBorder,
         icon: Icons.bluetooth_disabled_rounded,
         title: 'Bluetooth Off',
-        subtitle: 'Turn on Bluetooth to scan for ${BLEConstants.deviceName}.',
+        subtitle:
+            'Turn on Bluetooth to scan for ${BLEConstants.scanNamePrefix}* devices.',
         actions: [
           _StatusActionButton(
             label: 'Enable Bluetooth',
@@ -341,8 +342,7 @@ class _HeroStatusCard extends StatelessWidget {
         border: ConnectionColors.scanningBorder,
         icon: Icons.radar_rounded,
         title: 'Scanning',
-        subtitle:
-            'Searching for ${BLEConstants.deviceName} controllers nearby.',
+        subtitle: 'Searching for RRC_* controllers nearby.',
         loading: true,
       );
     }
@@ -986,7 +986,7 @@ class _EmptyDeviceState extends StatelessWidget {
             const SizedBox(height: 6),
             Text(
               scanning
-                  ? 'Looking for ${BLEConstants.deviceName} nearby.'
+                  ? 'Looking for ${BLEConstants.scanNamePrefix}* nearby.'
                   : 'Power on the PLC14 controller and keep it in BLE range.',
               textAlign: TextAlign.center,
               style: const TextStyle(

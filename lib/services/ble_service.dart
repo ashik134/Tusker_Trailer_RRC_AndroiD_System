@@ -102,12 +102,22 @@ class BleService {
       (results) {
         final seen = <String>{};
         final devices = results
+            .where((result) {
+              final advertisedName = result.advertisementData.advName.trim();
+              final platformName = result.device.platformName.trim();
+              final resolvedName = advertisedName.isNotEmpty
+                  ? advertisedName
+                  : platformName;
+
+              // Ignore unnamed devices and only include configurable PLC names.
+              return resolvedName.isNotEmpty &&
+                  resolvedName.startsWith(BLEConstants.scanNamePrefix);
+            })
             .map(BleScanDevice.fromScanResult)
-            .where((d) => d.name == BLEConstants.deviceName)
             .where((d) => seen.add(d.id))
             .toList();
         debugPrint(
-          'Scan update: ${devices.length} ${BLEConstants.deviceName} device(s) found',
+          'Scan update: ${devices.length} ${BLEConstants.scanNamePrefix}* device(s) found',
         );
         _scanController.add(List.unmodifiable(devices));
       },
