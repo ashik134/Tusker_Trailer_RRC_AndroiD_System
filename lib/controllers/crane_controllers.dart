@@ -47,6 +47,8 @@ class CraneController extends ChangeNotifier {
   String? _errorMessage;
   String _savedEmail = '';
   String _savedPassword = '';
+  final Set<HoistDirection> _activeDirectionalHolds = <HoistDirection>{};
+  HoistDirection? _directionLock;
   // bool _conflictActive = false;
   // bool _upActive = false;
   // bool _downActive = false;
@@ -70,6 +72,11 @@ class CraneController extends ChangeNotifier {
   bool get rememberCredentials => _rememberCredentials;
   PlcOutputCommand get activeCommand => _activeCommand;
   bool get estopLatched => _estopLatched;
+    bool get upHoldActive =>
+      _activeDirectionalHolds.contains(HoistDirection.up);
+    bool get downHoldActive =>
+      _activeDirectionalHolds.contains(HoistDirection.down);
+    HoistDirection? get directionLock => _directionLock;
   String? get sessionEmail => _sessionEmail;
   String? get errorMessage => _errorMessage ?? _transportConnState.message;
   List<BleScanDevice> get devices => _devices;
@@ -182,6 +189,55 @@ class CraneController extends ChangeNotifier {
     await _sendCommand(next);
   }
 
+  Future<bool> setDirectionalHold({
+    required HoistDirection direction,
+    required bool pressed,
+    bool fast = false,
+  }) async {
+    if (direction != HoistDirection.up && direction != HoistDirection.down) {
+      return false;
+    }
+
+    if (_estopLatched || !isConnected) {
+      if (!pressed) {
+        _activeDirectionalHolds.remove(direction);
+        if (_directionLock == direction &&
+            !_activeDirectionalHolds.contains(direction)) {
+          _directionLock = null;
+        }
+        notifyListeners();
+      }
+      return false;
+    }
+
+    bool changed = false;
+
+    if (pressed) {
+      if (_directionLock != null && _directionLock != direction) {
+        return false;
+      }
+      changed = _activeDirectionalHolds.add(direction);
+      _directionLock ??= direction;
+    } else {
+      changed = _activeDirectionalHolds.remove(direction);
+      if (_directionLock == direction &&
+          !_activeDirectionalHolds.contains(direction)) {
+        _directionLock = null;
+      }
+    }
+
+    await _recomputeDirectionalCommandAndSend(fast: fast);
+    notifyListeners();
+    return changed;
+  }
+
+  Future<void> releaseAllDirectionalHolds() async {
+    _clearDirectionalHolds(notify: true);
+    if (!_estopLatched && isConnected) {
+      await _sendCommand(PlcOutputCommand.idle());
+    }
+  }
+
   // Future<void> sendCommand({
   //   required bool estop,
   //   required bool up,
@@ -278,6 +334,7 @@ class CraneController extends ChangeNotifier {
     _connStateSubscription = _bleService.connectionStream.listen((snapshot) {
       _transportConnState = snapshot;
       if (snapshot.status == BleConnectionStatus.disconnected) {
+        _clearDirectionalHolds(notify: false);
         _activeCommand = PlcOutputCommand.idle();
         _estopLatched = false;
         _sessionEmail = null;
@@ -465,6 +522,7 @@ class CraneController extends ChangeNotifier {
 
   Future<void> triggerEStop() async {
     _estopLatched = true;
+    _clearDirectionalHolds(notify: false);
     final cmd = PlcOutputCommand.emergencyStop();
     _activeCommand = cmd;
     notifyListeners();
@@ -483,7 +541,42 @@ class CraneController extends ChangeNotifier {
 
   Future<void> resetEStop() async {
     _estopLatched = false;
+    _clearDirectionalHolds(notify: false);
     await _sendCommand(PlcOutputCommand.idle());
+  }
+
+  Future<void> _recomputeDirectionalCommandAndSend({required bool fast}) async {
+    final upHeld = _activeDirectionalHolds.contains(HoistDirection.up);
+    final downHeld = _activeDirectionalHolds.contains(HoistDirection.down);
+
+    HoistDirection resolvedDirection = HoistDirection.idle;
+    if (_directionLock != null && _activeDirectionalHolds.contains(_directionLock)) {
+      resolvedDirection = _directionLock!;
+    } else if (upHeld && !downHeld) {
+      resolvedDirection = HoistDirection.up;
+    } else if (downHeld && !upHeld) {
+      resolvedDirection = HoistDirection.down;
+    }
+
+    if (resolvedDirection == HoistDirection.idle) {
+      await _sendCommand(PlcOutputCommand.idle());
+      return;
+    }
+
+    await _sendCommand(
+      PlcOutputCommand.motion(
+        direction: resolvedDirection,
+        speed: fast ? HoistSpeed.fast : HoistSpeed.slow,
+      ),
+    );
+  }
+
+  void _clearDirectionalHolds({required bool notify}) {
+    _activeDirectionalHolds.clear();
+    _directionLock = null;
+    if (notify) {
+      notifyListeners();
+    }
   }
 
   Future<void> tapHoistButton({required bool isUp}) async {

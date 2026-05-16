@@ -5,6 +5,7 @@ import 'package:vibration/vibration.dart';
 
 import 'package:tusker_trailer_rrc/utils/constants.dart';
 import 'package:tusker_trailer_rrc/controllers/crane_controllers.dart';
+import 'package:tusker_trailer_rrc/models/plc_output_command.dart';
 import 'package:tusker_trailer_rrc/widgets/estop_swipe_button.dart';
 
 // ═══════════════════════════════════════════════════════════════
@@ -33,13 +34,9 @@ class ControlScreen extends StatefulWidget {
 
 class _ControlScreenState extends State<ControlScreen>
     with SingleTickerProviderStateMixin {
-  
+
   late final AnimationController _pulseController;
   CraneController? _craneController;
-
-  // ── Deadman state tracking ──────────────────────────────
-  bool _upPressed = false;
-  bool _downPressed = false;
 
   @override
   void initState() {
@@ -69,12 +66,6 @@ class _ControlScreenState extends State<ControlScreen>
     if (!mounted || controller == null) return;
 
     if (controller.isDisconnected) {
-      // Auto-release both buttons on disconnect
-      setState(() {
-        _upPressed = false;
-        _downPressed = false;
-      });
-      
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(controller.errorMessage ?? 'Disconnected from PLC14'),
@@ -89,56 +80,62 @@ class _ControlScreenState extends State<ControlScreen>
   // Deadman Hold-to-Run Handlers
   // ═══════════════════════════════════════════════════════════
 
-  /// UP button pressed — activate UP output, disable DOWN
-  void _onUpPressed() {
+  /// UP button pressed — request UP hold via centralized state engine
+  Future<void> _onUpPressed() async {
     final controller = _craneController;
     if (controller == null) return;
     if (controller.estopLatched || !controller.isConnected) return;
-    if (_downPressed) return; // Mutual exclusion: DOWN is active
-    
-    setState(() => _upPressed = true);
+
+    final accepted = await controller.setDirectionalHold(
+      direction: HoistDirection.up,
+      pressed: true,
+      fast: false,
+    );
+    if (!accepted) return;
+
     HapticFeedback.mediumImpact();
     Vibration.vibrate(duration: 30, amplitude: 128);
-    
-    // Send command: [estop=0, up=1, down=0, fast=0]
-    controller.sendCommand(estop: false, up: true, down: false, fast: false);
   }
 
-  /// UP button released — deactivate UP output
-  void _onUpReleased() {
+  /// UP button released — clear UP hold via centralized state engine
+  Future<void> _onUpReleased() async {
     final controller = _craneController;
     if (controller == null) return;
-    
-    setState(() => _upPressed = false);
-    
-    // Send command: [estop=0, up=0, down=0, fast=0]
-    controller.sendCommand(estop: false, up: false, down: false, fast: false);
+
+    await controller.setDirectionalHold(
+      direction: HoistDirection.up,
+      pressed: false,
+      fast: false,
+    );
   }
 
-  /// DOWN button pressed — activate DOWN output, disable UP
-  void _onDownPressed() {
+  /// DOWN button pressed — request DOWN hold via centralized state engine
+  Future<void> _onDownPressed() async {
     final controller = _craneController;
     if (controller == null) return;
     if (controller.estopLatched || !controller.isConnected) return;
-    if (_upPressed) return; // Mutual exclusion: UP is active
-    
-    setState(() => _downPressed = true);
+
+    final accepted = await controller.setDirectionalHold(
+      direction: HoistDirection.down,
+      pressed: true,
+      fast: false,
+    );
+    if (!accepted) return;
+
     HapticFeedback.mediumImpact();
     Vibration.vibrate(duration: 30, amplitude: 128);
-    
-    // Send command: [estop=0, up=0, down=1, fast=0]
-    controller.sendCommand(estop: false, up: false, down: true, fast: false);
   }
 
-  /// DOWN button released — deactivate DOWN output
-  void _onDownReleased() {
+  /// DOWN button released — clear DOWN hold via centralized state engine
+  Future<void> _onDownReleased() async {
     final controller = _craneController;
     if (controller == null) return;
-    
-    setState(() => _downPressed = false);
-    
-    // Send command: [estop=0, up=0, down=0, fast=0]
-    controller.sendCommand(estop: false, up: false, down: false, fast: false);
+
+    await controller.setDirectionalHold(
+      direction: HoistDirection.down,
+      pressed: false,
+      fast: false,
+    );
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -147,13 +144,8 @@ class _ControlScreenState extends State<ControlScreen>
 
   Future<void> _onEStopTap() async {
     final controller = context.read<CraneController>();
-    
-    // Release both deadman buttons
-    setState(() {
-      _upPressed = false;
-      _downPressed = false;
-    });
-    
+
+    await controller.releaseAllDirectionalHolds();
     await controller.triggerEStop();
     Vibration.vibrate(duration: 600, amplitude: 255);
     
@@ -196,7 +188,9 @@ class _ControlScreenState extends State<ControlScreen>
     return Consumer<CraneController>(
       builder: (ctx, controller, _) {
         final isDisabled = controller.estopLatched || !controller.isConnected;
-        
+        final upPressed = controller.upHoldActive;
+        final downPressed = controller.downHoldActive;
+
         return Scaffold(
           backgroundColor: ConnectionColors.background,
           resizeToAvoidBottomInset: false,
@@ -249,11 +243,8 @@ class _ControlScreenState extends State<ControlScreen>
                   color: ConnectionColors.textSecondary,
                 ),
                 tooltip: 'Disconnect',
-                onPressed: () {
-                  setState(() {
-                    _upPressed = false;
-                    _downPressed = false;
-                  });
+                onPressed: () async {
+                  await controller.releaseAllDirectionalHolds();
                   controller.disconnect();
                 },
               ),
@@ -292,8 +283,8 @@ class _ControlScreenState extends State<ControlScreen>
                             icon: Icons.arrow_upward_rounded,
                             color: AppColors.upColor,
                             colorLight: AppColors.upColorLight,
-                            isPressed: _upPressed,
-                            isDisabled: isDisabled || _downPressed,
+                            isPressed: upPressed,
+                            isDisabled: isDisabled || downPressed,
                             onPressed: _onUpPressed,
                             onReleased: _onUpReleased,
                           ),
@@ -308,8 +299,8 @@ class _ControlScreenState extends State<ControlScreen>
                             icon: Icons.arrow_downward_rounded,
                             color: AppColors.downColor,
                             colorLight: AppColors.downColorLight,
-                            isPressed: _downPressed,
-                            isDisabled: isDisabled || _upPressed,
+                            isPressed: downPressed,
+                            isDisabled: isDisabled || upPressed,
                             onPressed: _onDownPressed,
                             onReleased: _onDownReleased,
                           ),
@@ -359,13 +350,13 @@ class _ControlScreenState extends State<ControlScreen>
           ),
           _ledIndicator(
             label: 'UP',
-            active: controller.ledUp || _upPressed,
+            active: controller.ledUp || controller.upHoldActive,
             color: AppColors.upColor,
             pinName: 'Q0.1',
           ),
           _ledIndicator(
             label: 'DOWN',
-            active: controller.ledDown || _downPressed,
+            active: controller.ledDown || controller.downHoldActive,
             color: AppColors.downColor,
             pinName: 'Q0.2',
           ),
@@ -456,10 +447,10 @@ class _ControlScreenState extends State<ControlScreen>
     if (controller.estopLatched) {
       c = AppColors.eStopColor;
       status = 'EMERGENCY STOP';
-    } else if (_upPressed) {
+    } else if (controller.upHoldActive) {
       c = AppColors.upColor;
       status = 'HOISTING UP — HOLD TO RUN';
-    } else if (_downPressed) {
+    } else if (controller.downHoldActive) {
       c = AppColors.downColor;
       status = 'HOISTING DOWN — HOLD TO RUN';
     } else {
@@ -486,7 +477,7 @@ class _ControlScreenState extends State<ControlScreen>
             decoration: BoxDecoration(
               color: c,
               shape: BoxShape.circle,
-              boxShadow: (_upPressed || _downPressed)
+              boxShadow: (controller.upHoldActive || controller.downHoldActive)
                   ? [BoxShadow(color: c.withAlpha(128), blurRadius: 6)]
                   : null,
             ),
@@ -696,8 +687,8 @@ class _DeadmanButton extends StatefulWidget {
   final Color colorLight;
   final bool isPressed;
   final bool isDisabled;
-  final VoidCallback onPressed;
-  final VoidCallback onReleased;
+  final Future<void> Function() onPressed;
+  final Future<void> Function() onReleased;
 
   const _DeadmanButton({
     required this.label,
