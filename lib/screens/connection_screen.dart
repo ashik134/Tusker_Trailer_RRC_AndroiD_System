@@ -766,38 +766,30 @@ class _SignalPill extends StatelessWidget {
         : ConnectionColors.error;
     final barValue = (((rssi + 100) / 50).clamp(0.05, 1.0)).toDouble();
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-      decoration: BoxDecoration(
-        color: tone.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: tone.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              '$rssi dBm  |  $label',
-              style: TextStyle(
-                color: tone,
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-              ),
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            '$rssi dBm ',
+            style: TextStyle(
+              color: tone,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
             ),
           ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 36,
-            child: LinearProgressIndicator(
-              value: barValue,
-              minHeight: 4,
-              borderRadius: BorderRadius.circular(4),
-              backgroundColor: tone.withValues(alpha: 0.22),
-              valueColor: AlwaysStoppedAnimation<Color>(tone),
-            ),
-          ),
-        ],
-      ),
+        ),
+        const SizedBox(width: 8),
+        // SizedBox(
+        //   width: 36,
+        //   child: LinearProgressIndicator(
+        //     value: barValue,
+        //     minHeight: 4,
+        //     borderRadius: BorderRadius.circular(4),
+        //     backgroundColor: tone.withValues(alpha: 0.22),
+        //     valueColor: AlwaysStoppedAnimation<Color>(tone),
+        //   ),
+        // ),
+      ],
     );
   }
 }
@@ -816,31 +808,41 @@ class _ConnectedDeviceCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: ConnectionColors.connectedBg,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: ConnectionColors.connectedBorder),
       ),
       child: Column(
         children: [
+          // ── Device Info Row ──────────────────────────
           Row(
             children: [
+              // Device icon
               Container(
-                width: 44,
-                height: 44,
+                width: 48,
+                height: 48,
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: ConnectionColors.connectedBorder),
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: ConnectionColors.connected.withAlpha(30),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
                 ),
                 child: const Icon(
-                  Icons.verified_rounded,
+                  Icons.developer_board_rounded,
                   color: ConnectionColors.connected,
-                  size: 22,
+                  size: 24,
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 14),
+              
+              // Device details
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -851,11 +853,12 @@ class _ConnectedDeviceCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: ConnectionColors.textPrimary,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.2,
                       ),
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 3),
                     Text(
                       device.id,
                       maxLines: 1,
@@ -869,42 +872,43 @@ class _ConnectedDeviceCard extends StatelessWidget {
                   ],
                 ),
               ),
+              
+              // Status / Connecting indicator
               if (isConnecting)
                 const SizedBox(
-                  width: 16,
-                  height: 16,
+                  width: 20,
+                  height: 20,
                   child: CircularProgressIndicator(
-                    strokeWidth: 2,
+                    strokeWidth: 2.5,
                     color: ConnectionColors.scanning,
                   ),
                 )
               else
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
                     color: Colors.white,
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: ConnectionColors.connectedBorder),
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: ConnectionColors.connected.withAlpha(25),
+                        blurRadius: 4,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
                   ),
                   child: const Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(
-                        Icons.circle,
-                        size: 8,
-                        color: ConnectionColors.connected,
-                      ),
-                      SizedBox(width: 4),
+                      _PulsingDot(size: 7, color: ConnectionColors.connected),
+                      SizedBox(width: 6),
                       Text(
                         'LIVE',
                         style: TextStyle(
                           color: ConnectionColors.connected,
-                          fontSize: 10,
+                          fontSize: 11,
                           fontWeight: FontWeight.w800,
-                          letterSpacing: 0.5,
+                          letterSpacing: 0.8,
                         ),
                       ),
                     ],
@@ -912,8 +916,16 @@ class _ConnectedDeviceCard extends StatelessWidget {
                 ),
             ],
           ),
+          
           if (!isConnecting) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
+            
+            // ── RSSI Bar ────────────────────────────────
+            _RSSIBar(rssi: device.rssi),
+            
+            const SizedBox(height: 14),
+            
+            // ── Disconnect Button ───────────────────────
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
@@ -923,23 +935,208 @@ class _ConnectedDeviceCard extends StatelessWidget {
                 style: OutlinedButton.styleFrom(
                   foregroundColor: ConnectionColors.error,
                   side: BorderSide(
-                    color: ConnectionColors.error.withValues(alpha: 0.5),
+                    color: ConnectionColors.error.withAlpha(80),
                   ),
-                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(12),
                   ),
                   textStyle: const TextStyle(
                     fontSize: 12,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.5,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
                   ),
+                  backgroundColor: ConnectionColors.error.withAlpha(10),
                 ),
               ),
             ),
           ],
         ],
       ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// RSSI Bar — Clean visual signal indicator (no text labels)
+// ═══════════════════════════════════════════════════════════
+
+class _RSSIBar extends StatelessWidget {
+  const _RSSIBar({required this.rssi});
+
+  final int rssi;
+
+  // Normalize RSSI to 0.0–1.0 range
+  // -30 = excellent, -100 = very weak
+  double get _signalStrength => ((rssi + 100) / 70).clamp(0.0, 1.0);
+
+  int get _filledBars {
+    if (_signalStrength >= 0.85) return 5;
+    if (_signalStrength >= 0.65) return 4;
+    if (_signalStrength >= 0.45) return 3;
+    if (_signalStrength >= 0.25) return 2;
+    if (_signalStrength >= 0.1) return 1;
+    return 0;
+  }
+
+  Color get _signalColor {
+    if (_signalStrength >= 0.65) return ConnectionColors.connected;
+    if (_signalStrength >= 0.35) return ConnectionColors.warning;
+    return ConnectionColors.error;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          // Signal icon
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: _signalColor.withAlpha(20),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              Icons.signal_cellular_alt_rounded,
+              color: _signalColor,
+              size: 18,
+            ),
+          ),
+          const SizedBox(width: 12),
+          
+          // Signal bars
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Bars row
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: List.generate(5, (index) {
+                    final isFilled = index < _filledBars;
+                    final barHeight = 6.0 + (index * 4.0);
+                    
+                    return Container(
+                      width: 8,
+                      height: barHeight,
+                      margin: const EdgeInsets.only(right: 4),
+                      decoration: BoxDecoration(
+                        color: isFilled ? _signalColor : ConnectionColors.border.withAlpha(150),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    );
+                  }),
+                ),
+                const SizedBox(height: 4),
+                // RSSI value only (no text label)
+                Text(
+                  '$rssi dBm',
+                  style: TextStyle(
+                    color: _signalColor,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    fontFamily: 'monospace',
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
+          const SizedBox(width: 8),
+          
+          // Signal percentage
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: _signalColor.withAlpha(20),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              '${(_signalStrength * 100).toInt()}%',
+              style: TextStyle(
+                color: _signalColor,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// Pulsing Dot (animated live indicator)
+// ═══════════════════════════════════════════════════════════
+
+class _PulsingDot extends StatefulWidget {
+  const _PulsingDot({
+    required this.size,
+    required this.color,
+  });
+
+  final double size;
+  final Color color;
+
+  @override
+  State<_PulsingDot> createState() => _PulsingDotState();
+}
+
+class _PulsingDotState extends State<_PulsingDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _animation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
+    _animation = Tween<double>(begin: 0.5, end: 1.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _animation,
+      builder: (context, child) {
+        return Container(
+          width: widget.size,
+          height: widget.size,
+          decoration: BoxDecoration(
+            color: widget.color.withAlpha((255 * _animation.value).toInt()),
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: widget.color.withAlpha((77 * _animation.value).toInt()),
+                blurRadius: 4 * _animation.value,
+                spreadRadius: 1,
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
