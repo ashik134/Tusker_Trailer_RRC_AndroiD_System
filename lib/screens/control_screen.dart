@@ -327,10 +327,9 @@ class _ControlScreenState extends State<ControlScreen>
                 final height = constraints.maxHeight;
                 final isCompactWidth = width < 390;
                 final isCompactHeight = height < 720;
-                final isLandscape = width > height;
-                final isCompact = isCompactWidth || isCompactHeight;
                 final outerPadding = isCompactWidth ? 10.0 : 12.0;
                 final sectionSpacing = isCompactHeight ? 8.0 : 12.0;
+                final isCompact = isCompactWidth || isCompactHeight;
 
                 return Padding(
                   padding: EdgeInsets.fromLTRB(
@@ -344,7 +343,6 @@ class _ControlScreenState extends State<ControlScreen>
                       _buildSafetyActionPanel(
                         controller: controller,
                         compact: isCompact,
-                        landscape: isLandscape,
                       ),
                       SizedBox(height: sectionSpacing),
                       _liveLEDs(
@@ -355,7 +353,6 @@ class _ControlScreenState extends State<ControlScreen>
                       Expanded(
                         child: _buildButtonGrid(
                           isCompact: isCompact,
-                          isLandscape: isLandscape,
                           isDisabled: controller.estopLatched || !controller.isConnected,
                           upPressed: controller.upHoldActive,
                           downPressed: controller.downHoldActive,
@@ -382,19 +379,19 @@ class _ControlScreenState extends State<ControlScreen>
   Widget _buildSafetyActionPanel({
     required CraneController controller,
     required bool compact,
-    required bool landscape,
   }) {
-    return SizedBox(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOut,
       width: double.infinity,
       child: controller.estopLatched
-          ? _buildResetSection(compact: compact, landscape: landscape)
+          ? _buildResetSection(compact: compact)
           : _buildEStopButton(compact: compact),
     );
   }
 
   Widget _buildButtonGrid({
     required bool isCompact,
-    required bool isLandscape,
     required bool isDisabled,
     required bool upPressed,
     required bool downPressed,
@@ -438,7 +435,7 @@ class _ControlScreenState extends State<ControlScreen>
             ],
           ),
         ),
-        SizedBox(height: isCompact ? 8 : 12),
+        SizedBox(height: buttonSpacing),
         Expanded(
           child: Row(
             children: [
@@ -785,87 +782,7 @@ class _ControlScreenState extends State<ControlScreen>
   // E-Stop Reset Section
   // ═══════════════════════════════════════════════════════════
 
-  Widget _buildResetSection({
-    required bool compact,
-    required bool landscape,
-  }) {
-    if (compact || landscape) {
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Expanded(
-            child: Container(
-              padding: EdgeInsets.all(compact ? 8 : 10),
-              decoration: BoxDecoration(
-                color: AppColors.eStopColor.withAlpha(25),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: AppColors.eStopColor.withAlpha(130),
-                  width: 2,
-                ),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: compact ? 28 : 32,
-                    height: compact ? 28 : 32,
-                    decoration: const BoxDecoration(
-                      color: AppColors.eStopColor,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.warning_amber_rounded,
-                      color: Colors.white,
-                      size: 18,
-                    ),
-                  ),
-                  SizedBox(width: compact ? 8 : 10),
-                  const Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'EMERGENCY STOP ACTIVE',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: AppColors.eStopColorLight,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                            letterSpacing: 0.8,
-                          ),
-                        ),
-                        Text(
-                          'All crane controls are locked',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: ConnectionColors.textSecondary,
-                            fontSize: 10,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          SizedBox(width: compact ? 8 : 10),
-          Expanded(
-            child: EStopSwipeButton(
-              onActivated: _onResetEStopTap,
-              instructionTitle: compact ? 'RESET LOCKOUT' : 'SWIPE TO RESET',
-              instructionSubtitle: compact
-                  ? 'Slide right to clear emergency lockout'
-                  : 'Slide right to clear emergency lockout',
-            ),
-          ),
-        ],
-      );
-    }
-
+  Widget _buildResetSection({required bool compact}) {
     return Column(
       children: [
         Container(
@@ -882,8 +799,8 @@ class _ControlScreenState extends State<ControlScreen>
           child: Row(
             children: [
               Container(
-                width: compact ? 30 : 32,
-                height: compact ? 30 : 32,
+                width: 32,
+                height: 32,
                 decoration: const BoxDecoration(
                   color: AppColors.eStopColor,
                   shape: BoxShape.circle,
@@ -894,7 +811,7 @@ class _ControlScreenState extends State<ControlScreen>
                   size: 18,
                 ),
               ),
-              SizedBox(width: compact ? 8 : 10),
+              const SizedBox(width: 10),
               const Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -925,7 +842,9 @@ class _ControlScreenState extends State<ControlScreen>
         SizedBox(
           width: double.infinity,
           child: EStopSwipeButton(
-            onActivated: _onResetEStopTap,
+            onActivated: () {
+              _onResetEStopTap();
+            },
             instructionTitle: 'SWIPE TO RESET E-STOP',
             instructionSubtitle: 'Slide right to clear emergency lockout',
           ),
