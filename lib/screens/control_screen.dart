@@ -493,10 +493,12 @@ class _ControlScreenState extends State<ControlScreen>
         runSpacing: compact ? 8 : 10,
         alignment: WrapAlignment.center,
         children: [
+          // E-STOP is always lit to communicate safety readiness state.
           _ledIndicator(
             label: 'ESTOP',
-            active: controller.ledEstop,
+            active: controller.estopLatched || controller.ledEstop,
             color: AppColors.eStopColor,
+            inactiveColor: AppColors.upColorLight,
             pinName: 'R0_0',
           ),
           _ledIndicator(
@@ -549,25 +551,33 @@ class _ControlScreenState extends State<ControlScreen>
     required Color color,
     required bool active,
     required String pinName,
+    Color? inactiveColor,
   }) {
+    final targetColor = active ? color : (inactiveColor ?? Colors.grey.shade300);
+    final isLit = active || inactiveColor != null;
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        TweenAnimationBuilder<double>(
-          tween: Tween(begin: 0.0, end: active ? 1.0 : 0.0),
+        TweenAnimationBuilder<Color?>(
+          tween: ColorTween(
+            begin: Colors.grey.shade300,
+            end: targetColor,
+          ),
           duration: const Duration(milliseconds: 300),
-          builder: (context, value, child) {
+          builder: (context, animatedColor, child) {
+            final ledColor = animatedColor ?? targetColor;
             return Container(
               width: 14,
               height: 14,
               decoration: BoxDecoration(
-                color: active ? color : Colors.grey.shade300,
+                color: ledColor,
                 shape: BoxShape.circle,
-                boxShadow: active
+                boxShadow: isLit
                     ? [
                         BoxShadow(
-                          color: color.withAlpha(153),
-                          blurRadius: 6 * value,
+                          color: ledColor.withAlpha(active ? 153 : 128),
+                          blurRadius: active ? 6 : 5,
                           spreadRadius: 1,
                         ),
                       ]
@@ -714,7 +724,7 @@ class _ControlScreenState extends State<ControlScreen>
       onTap: _onEStopTap,
       child: Container(
         width: double.infinity,
-        constraints: BoxConstraints(minHeight: compact ? 54 : 58),
+        constraints: BoxConstraints(minHeight: compact ? 90 : 58),
         decoration: BoxDecoration(
           gradient: const LinearGradient(
             colors: [Color(0xFF6B0000), AppColors.eStopColor],
