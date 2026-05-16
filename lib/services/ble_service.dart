@@ -387,7 +387,7 @@ class BleService {
     _logger.i(
       'PLC status: estop=${command.estop} dir=${command.direction} speed=${command.speed}',
     );
-    if (command.isIdle) {
+    if (command.estop || command.isIdle) {
       final pending = _pendingSafeStateCompleter;
       if (pending != null && !pending.isCompleted) {
         pending.complete();
@@ -446,7 +446,7 @@ class BleService {
       throw StateError('Digital characteristic is not ready.');
     }
     await _digitalChar!.write(
-      PlcOutputCommand.idle().wireBytes.toList(),
+      PlcOutputCommand.emergencyStop().wireBytes.toList(),
       withoutResponse: false,
     );
   }

@@ -558,6 +558,7 @@ class CraneController extends ChangeNotifier {
   Future<void> ensureControlEntryEmergencyLock() async {
     if (!isConnected || _startupEmergencyArmedForConnection) return;
     _startupEmergencyArmedForConnection = true;
+    if (_activeCommand.estop || _estopLatched) return;
     await triggerEStop();
   }
 
