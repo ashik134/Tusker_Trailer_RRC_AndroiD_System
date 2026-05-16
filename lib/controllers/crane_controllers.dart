@@ -13,6 +13,8 @@ enum AppScreen { connection, authentication, control }
 
 enum HoistState { idle, upSlow, upFast, downSlow, downFast }
 
+enum MotionAxis { vertical, horizontal }
+
 class CraneController extends ChangeNotifier {
   final BleService _bleService = BleService();
   final PermissionService _permissionService = PermissionService();
@@ -50,7 +52,8 @@ class CraneController extends ChangeNotifier {
   String _savedEmail = '';
   String _savedPassword = '';
   final Set<HoistDirection> _activeDirectionalHolds = <HoistDirection>{};
-  HoistDirection? _directionLock;
+  HoistDirection? _verticalDirectionLock;
+  HoistDirection? _horizontalDirectionLock;
   // bool _conflictActive = false;
   // bool _upActive = false;
   // bool _downActive = false;
@@ -74,11 +77,14 @@ class CraneController extends ChangeNotifier {
   bool get rememberCredentials => _rememberCredentials;
   PlcOutputCommand get activeCommand => _activeCommand;
   bool get estopLatched => _estopLatched;
-    bool get upHoldActive =>
+  bool get upHoldActive =>
       _activeDirectionalHolds.contains(HoistDirection.up);
-    bool get downHoldActive =>
+  bool get downHoldActive =>
       _activeDirectionalHolds.contains(HoistDirection.down);
-    HoistDirection? get directionLock => _directionLock;
+  bool get leftHoldActive =>
+      _activeDirectionalHolds.contains(HoistDirection.left);
+  bool get rightHoldActive =>
+      _activeDirectionalHolds.contains(HoistDirection.right);
   String? get sessionEmail => _sessionEmail;
   String? get errorMessage => _errorMessage ?? _transportConnState.message;
   List<BleScanDevice> get devices => _devices;
@@ -109,10 +115,10 @@ class CraneController extends ChangeNotifier {
   // ── LED indicator states ─────────────────────────────────────────────────
   // Emergency indicator must represent the active lockout condition only.
   bool get ledEstop => _estopLatched;
-  bool get ledUp =>
-      _activeCommand.direction == HoistDirection.up && !_activeCommand.estop;
-  bool get ledDown =>
-      _activeCommand.direction == HoistDirection.down && !_activeCommand.estop;
+    bool get ledUp => _activeCommand.up && !_activeCommand.estop;
+    bool get ledDown => _activeCommand.down && !_activeCommand.estop;
+    bool get ledLeft => _activeCommand.left && !_activeCommand.estop;
+    bool get ledRight => _activeCommand.right && !_activeCommand.estop;
   bool get ledFast =>
       _activeCommand.speed == HoistSpeed.fast && !_activeCommand.estop;
 
@@ -121,12 +127,14 @@ class CraneController extends ChangeNotifier {
 
   // ── Hoist state derived from active command ───────────────────────────────
   HoistState get hoistState {
-    if (_activeCommand.estop) return HoistState.idle;
-    return switch ((_activeCommand.direction, _activeCommand.speed)) {
-      (HoistDirection.up, HoistSpeed.slow) => HoistState.upSlow,
-      (HoistDirection.up, HoistSpeed.fast) => HoistState.upFast,
-      (HoistDirection.down, HoistSpeed.slow) => HoistState.downSlow,
-      (HoistDirection.down, HoistSpeed.fast) => HoistState.downFast,
+    if (_activeCommand.estop || _activeCommand.hasHorizontalMotion) {
+      return HoistState.idle;
+    }
+    return switch ((_activeCommand.up, _activeCommand.down, _activeCommand.speed)) {
+      (true, false, HoistSpeed.fast) => HoistState.upFast,
+      (true, false, _) => HoistState.upSlow,
+      (false, true, HoistSpeed.fast) => HoistState.downFast,
+      (false, true, _) => HoistState.downSlow,
       _ => HoistState.idle,
     };
   }
@@ -161,6 +169,8 @@ class CraneController extends ChangeNotifier {
     required bool estop,
     required bool up,
     required bool down,
+    bool left = false,
+    bool right = false,
     required bool fast,
   }) async {
     if (estop) {
@@ -173,16 +183,14 @@ class CraneController extends ChangeNotifier {
     }
 
     final PlcOutputCommand next;
-    if (up && down) {
+    if ((up && down) || (left && right)) {
       next = PlcOutputCommand.idle();
-    } else if (up) {
+    } else if (up || down || left || right) {
       next = PlcOutputCommand.motion(
-        direction: HoistDirection.up,
-        speed: fast ? HoistSpeed.fast : HoistSpeed.slow,
-      );
-    } else if (down) {
-      next = PlcOutputCommand.motion(
-        direction: HoistDirection.down,
+        up: up,
+        down: down,
+        left: left,
+        right: right,
         speed: fast ? HoistSpeed.fast : HoistSpeed.slow,
       );
     } else {
@@ -197,16 +205,17 @@ class CraneController extends ChangeNotifier {
     required bool pressed,
     bool fast = false,
   }) async {
-    if (direction != HoistDirection.up && direction != HoistDirection.down) {
+    if (direction == HoistDirection.idle) {
       return false;
     }
+
+    final axis = _axisForDirection(direction);
 
     if (_estopLatched || !isConnected) {
       if (!pressed) {
         _activeDirectionalHolds.remove(direction);
-        if (_directionLock == direction &&
-            !_activeDirectionalHolds.contains(direction)) {
-          _directionLock = null;
+        if (_lockForAxis(axis) == direction && !_hasHoldOnAxis(axis)) {
+          _setLockForAxis(axis, null);
         }
         notifyListeners();
       }
@@ -216,16 +225,16 @@ class CraneController extends ChangeNotifier {
     bool changed = false;
 
     if (pressed) {
-      if (_directionLock != null && _directionLock != direction) {
+      final lock = _lockForAxis(axis);
+      if (lock != null && lock != direction) {
         return false;
       }
       changed = _activeDirectionalHolds.add(direction);
-      _directionLock ??= direction;
+      _setLockForAxis(axis, direction);
     } else {
       changed = _activeDirectionalHolds.remove(direction);
-      if (_directionLock == direction &&
-          !_activeDirectionalHolds.contains(direction)) {
-        _directionLock = null;
+      if (_lockForAxis(axis) == direction && !_hasHoldOnAxis(axis)) {
+        _setLockForAxis(axis, null);
       }
     }
 
@@ -564,26 +573,21 @@ class CraneController extends ChangeNotifier {
   }
 
   Future<void> _recomputeDirectionalCommandAndSend({required bool fast}) async {
-    final upHeld = _activeDirectionalHolds.contains(HoistDirection.up);
-    final downHeld = _activeDirectionalHolds.contains(HoistDirection.down);
+    final verticalDirection = _resolveAxisDirection(MotionAxis.vertical);
+    final horizontalDirection = _resolveAxisDirection(MotionAxis.horizontal);
 
-    HoistDirection resolvedDirection = HoistDirection.idle;
-    if (_directionLock != null && _activeDirectionalHolds.contains(_directionLock)) {
-      resolvedDirection = _directionLock!;
-    } else if (upHeld && !downHeld) {
-      resolvedDirection = HoistDirection.up;
-    } else if (downHeld && !upHeld) {
-      resolvedDirection = HoistDirection.down;
-    }
-
-    if (resolvedDirection == HoistDirection.idle) {
+    if (verticalDirection == HoistDirection.idle &&
+        horizontalDirection == HoistDirection.idle) {
       await _sendCommand(PlcOutputCommand.idle());
       return;
     }
 
     await _sendCommand(
       PlcOutputCommand.motion(
-        direction: resolvedDirection,
+        up: verticalDirection == HoistDirection.up,
+        down: verticalDirection == HoistDirection.down,
+        left: horizontalDirection == HoistDirection.left,
+        right: horizontalDirection == HoistDirection.right,
         speed: fast ? HoistSpeed.fast : HoistSpeed.slow,
       ),
     );
@@ -591,7 +595,8 @@ class CraneController extends ChangeNotifier {
 
   void _clearDirectionalHolds({required bool notify}) {
     _activeDirectionalHolds.clear();
-    _directionLock = null;
+    _verticalDirectionLock = null;
+    _horizontalDirectionLock = null;
     if (notify) {
       notifyListeners();
     }
@@ -603,24 +608,24 @@ class CraneController extends ChangeNotifier {
     if (isUp) {
       next = switch (hoistState) {
         HoistState.upSlow => PlcOutputCommand.motion(
-          direction: HoistDirection.up,
+          up: true,
           speed: HoistSpeed.fast,
         ),
         HoistState.upFast => PlcOutputCommand.idle(),
         _ => PlcOutputCommand.motion(
-          direction: HoistDirection.up,
+          up: true,
           speed: HoistSpeed.slow,
         ),
       };
     } else {
       next = switch (hoistState) {
         HoistState.downSlow => PlcOutputCommand.motion(
-          direction: HoistDirection.down,
+          down: true,
           speed: HoistSpeed.fast,
         ),
         HoistState.downFast => PlcOutputCommand.idle(),
         _ => PlcOutputCommand.motion(
-          direction: HoistDirection.down,
+          down: true,
           speed: HoistSpeed.slow,
         ),
       };
@@ -636,15 +641,64 @@ class CraneController extends ChangeNotifier {
     final PlcOutputCommand cmd = switch (state) {
       ControlState.idle => PlcOutputCommand.idle(),
       ControlState.slow => PlcOutputCommand.motion(
-        direction: isUp ? HoistDirection.up : HoistDirection.down,
+        up: isUp,
+        down: !isUp,
         speed: HoistSpeed.slow,
       ),
       ControlState.fast => PlcOutputCommand.motion(
-        direction: isUp ? HoistDirection.up : HoistDirection.down,
+        up: isUp,
+        down: !isUp,
         speed: HoistSpeed.fast,
       ),
     };
     await _sendCommand(cmd);
+  }
+
+  MotionAxis _axisForDirection(HoistDirection direction) {
+    return switch (direction) {
+      HoistDirection.up || HoistDirection.down => MotionAxis.vertical,
+      HoistDirection.left || HoistDirection.right => MotionAxis.horizontal,
+      HoistDirection.idle => MotionAxis.vertical,
+    };
+  }
+
+  HoistDirection? _lockForAxis(MotionAxis axis) {
+    return switch (axis) {
+      MotionAxis.vertical => _verticalDirectionLock,
+      MotionAxis.horizontal => _horizontalDirectionLock,
+    };
+  }
+
+  void _setLockForAxis(MotionAxis axis, HoistDirection? direction) {
+    switch (axis) {
+      case MotionAxis.vertical:
+        _verticalDirectionLock = direction;
+      case MotionAxis.horizontal:
+        _horizontalDirectionLock = direction;
+    }
+  }
+
+  bool _hasHoldOnAxis(MotionAxis axis) {
+    return _activeDirectionalHolds.any((hold) => _axisForDirection(hold) == axis);
+  }
+
+  HoistDirection _resolveAxisDirection(MotionAxis axis) {
+    final lock = _lockForAxis(axis);
+    if (lock != null && _activeDirectionalHolds.contains(lock)) {
+      return lock;
+    }
+
+    return switch (axis) {
+      MotionAxis.vertical when _activeDirectionalHolds.contains(HoistDirection.up) =>
+        HoistDirection.up,
+      MotionAxis.vertical when _activeDirectionalHolds.contains(HoistDirection.down) =>
+        HoistDirection.down,
+      MotionAxis.horizontal when _activeDirectionalHolds.contains(HoistDirection.left) =>
+        HoistDirection.left,
+      MotionAxis.horizontal when _activeDirectionalHolds.contains(HoistDirection.right) =>
+        HoistDirection.right,
+      _ => HoistDirection.idle,
+    };
   }
 
   Future<bool> authenticate({

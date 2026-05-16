@@ -38,6 +38,7 @@ class _ControlScreenState extends State<ControlScreen>
 
   late final AnimationController _pulseController;
   CraneController? _craneController;
+  bool _wasDisconnected = false;
 
   @override
   void initState() {
@@ -51,6 +52,7 @@ class _ControlScreenState extends State<ControlScreen>
       if (!mounted) return;
       final controller = context.read<CraneController>();
       _craneController = controller;
+      _wasDisconnected = controller.isDisconnected;
       controller.addListener(_onControllerChange);
       unawaited(controller.ensureControlEntryEmergencyLock());
     });
@@ -67,7 +69,8 @@ class _ControlScreenState extends State<ControlScreen>
     final controller = _craneController;
     if (!mounted || controller == null) return;
 
-    if (controller.isDisconnected) {
+    final isDisconnected = controller.isDisconnected;
+    if (isDisconnected && !_wasDisconnected) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(controller.errorMessage ?? 'Disconnected from PLC14'),
@@ -76,6 +79,8 @@ class _ControlScreenState extends State<ControlScreen>
         ),
       );
     }
+
+    _wasDisconnected = isDisconnected;
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -140,6 +145,60 @@ class _ControlScreenState extends State<ControlScreen>
     );
   }
 
+  Future<void> _onLeftPressed() async {
+    final controller = _craneController;
+    if (controller == null) return;
+    if (controller.estopLatched || !controller.isConnected) return;
+
+    final accepted = await controller.setDirectionalHold(
+      direction: HoistDirection.left,
+      pressed: true,
+      fast: false,
+    );
+    if (!accepted) return;
+
+    HapticFeedback.mediumImpact();
+    Vibration.vibrate(duration: 30, amplitude: 128);
+  }
+
+  Future<void> _onLeftReleased() async {
+    final controller = _craneController;
+    if (controller == null) return;
+
+    await controller.setDirectionalHold(
+      direction: HoistDirection.left,
+      pressed: false,
+      fast: false,
+    );
+  }
+
+  Future<void> _onRightPressed() async {
+    final controller = _craneController;
+    if (controller == null) return;
+    if (controller.estopLatched || !controller.isConnected) return;
+
+    final accepted = await controller.setDirectionalHold(
+      direction: HoistDirection.right,
+      pressed: true,
+      fast: false,
+    );
+    if (!accepted) return;
+
+    HapticFeedback.mediumImpact();
+    Vibration.vibrate(duration: 30, amplitude: 128);
+  }
+
+  Future<void> _onRightReleased() async {
+    final controller = _craneController;
+    if (controller == null) return;
+
+    await controller.setDirectionalHold(
+      direction: HoistDirection.right,
+      pressed: false,
+      fast: false,
+    );
+  }
+
   // ═══════════════════════════════════════════════════════════
   // E-Stop Handlers
   // ═══════════════════════════════════════════════════════════
@@ -184,15 +243,10 @@ class _ControlScreenState extends State<ControlScreen>
   // ═══════════════════════════════════════════════════════════
   // Build
   // ═══════════════════════════════════════════════════════════
-
   @override
   Widget build(BuildContext context) {
     return Consumer<CraneController>(
       builder: (ctx, controller, _) {
-        final isDisabled = controller.estopLatched || !controller.isConnected;
-        final upPressed = controller.upHoldActive;
-        final downPressed = controller.downHoldActive;
-
         return Scaffold(
           backgroundColor: ConnectionColors.background,
           resizeToAvoidBottomInset: false,
@@ -200,11 +254,15 @@ class _ControlScreenState extends State<ControlScreen>
             backgroundColor: ConnectionColors.surface,
             elevation: 0,
             automaticallyImplyLeading: false,
+            titleSpacing: 12,
             title: Column(
+              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   controller.connectedDeviceName ?? BLEConstants.deviceName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
@@ -212,6 +270,7 @@ class _ControlScreenState extends State<ControlScreen>
                   ),
                 ),
                 Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
                       width: 7,
@@ -224,13 +283,17 @@ class _ControlScreenState extends State<ControlScreen>
                         shape: BoxShape.circle,
                       ),
                     ),
-                    Text(
-                      controller.isConnected ? 'Connected' : 'Disconnected',
-                      style: TextStyle(
-                        color: controller.isConnected
-                            ? AppColors.upColorLight
-                            : AppColors.danger,
-                        fontSize: 10,
+                    Flexible(
+                      child: Text(
+                        controller.isConnected ? 'Connected' : 'Disconnected',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: controller.isConnected
+                              ? AppColors.upColorLight
+                              : AppColors.danger,
+                          fontSize: 10,
+                        ),
                       ),
                     ),
                   ],
@@ -243,15 +306,12 @@ class _ControlScreenState extends State<ControlScreen>
                   await controller.releaseAllDirectionalHolds();
                   controller.disconnect();
                 },
-                
                 child: const Text(
                   'SIGN OUT',
-                  style: TextStyle(
-                    color: ConnectionColors.textSecondary,
-                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: ConnectionColors.textSecondary),
                 ),
-                
-               
               ),
             ],
             bottom: PreferredSize(
@@ -261,70 +321,57 @@ class _ControlScreenState extends State<ControlScreen>
           ),
           body: SafeArea(
             maintainBottomViewPadding: true,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-              child: Column(
-                children: [
-                  // ── E-Stop / Reset Section ──────────────
-                  controller.estopLatched
-                      ? _buildResetSection()
-                      : _buildEStopButton(),
-                  
-                  const SizedBox(height: 8),
-                  
-                  // ── Live LED Indicators ──────────────────
-                  _liveLEDs(controller),
-                  
-                  const SizedBox(height: 8),
-                  
-                  // ── Deadman Hold-to-Run Buttons ──────────
-                  Expanded(
-                    child: Row(
-                      children: [
-                        // UP Button
-                        Expanded(
-                          child: _DeadmanButton(
-                            label: 'HOIST\nUP',
-                            icon: Icons.arrow_upward_rounded,
-                            color: AppColors.upColor,
-                            colorLight: AppColors.upColorLight,
-                            isPressed: upPressed,
-                            isDisabled: isDisabled || downPressed,
-                            onPressed: _onUpPressed,
-                            onReleased: _onUpReleased,
-                          ),
-                        ),
-                        
-                        const SizedBox(width: 16),
-                        
-                        // DOWN Button
-                        Expanded(
-                          child: _DeadmanButton(
-                            label: 'HOIST\nDOWN',
-                            icon: Icons.arrow_downward_rounded,
-                            color: AppColors.downColor,
-                            colorLight: AppColors.downColorLight,
-                            isPressed: downPressed,
-                            isDisabled: isDisabled || upPressed,
-                            onPressed: _onDownPressed,
-                            onReleased: _onDownReleased,
-                          ),
-                        ),
-                      ],
-                    ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final width = constraints.maxWidth;
+                final height = constraints.maxHeight;
+                final isCompactWidth = width < 390;
+                final isCompactHeight = height < 720;
+                final isLandscape = width > height;
+                final isCompact = isCompactWidth || isCompactHeight;
+                final outerPadding = isCompactWidth ? 10.0 : 12.0;
+                final sectionSpacing = isCompactHeight ? 8.0 : 12.0;
+
+                return Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    outerPadding,
+                    sectionSpacing,
+                    outerPadding,
+                    sectionSpacing,
                   ),
-                  
-                  const SizedBox(height: 8),
-                  
-                  // ── Status Bar ───────────────────────────
-                  _buildStatusBar(controller),
-                  
-                  const SizedBox(height: 8),
-                  
-                  // ── Safety Notice ────────────────────────
-                  // _buildSafetyNotice(),
-                ],
-              ),
+                  child: Column(
+                    children: [
+                      _buildSafetyActionPanel(
+                        controller: controller,
+                        compact: isCompact,
+                        landscape: isLandscape,
+                      ),
+                      SizedBox(height: sectionSpacing),
+                      _liveLEDs(
+                        controller,
+                        compact: isCompact,
+                      ),
+                      SizedBox(height: sectionSpacing),
+                      Expanded(
+                        child: _buildButtonGrid(
+                          isCompact: isCompact,
+                          isLandscape: isLandscape,
+                          isDisabled: controller.estopLatched || !controller.isConnected,
+                          upPressed: controller.upHoldActive,
+                          downPressed: controller.downHoldActive,
+                          leftPressed: controller.leftHoldActive,
+                          rightPressed: controller.rightHoldActive,
+                        ),
+                      ),
+                      SizedBox(height: sectionSpacing),
+                      _buildStatusBar(
+                        controller,
+                        isCompact: isCompact,
+                      ),
+                    ],
+                  ),
+                );
+              },
             ),
           ),
         );
@@ -332,25 +379,127 @@ class _ControlScreenState extends State<ControlScreen>
     );
   }
 
+  Widget _buildSafetyActionPanel({
+    required CraneController controller,
+    required bool compact,
+    required bool landscape,
+  }) {
+    return SizedBox(
+      width: double.infinity,
+      child: controller.estopLatched
+          ? _buildResetSection(compact: compact, landscape: landscape)
+          : _buildEStopButton(compact: compact),
+    );
+  }
+
+  Widget _buildButtonGrid({
+    required bool isCompact,
+    required bool isLandscape,
+    required bool isDisabled,
+    required bool upPressed,
+    required bool downPressed,
+    required bool leftPressed,
+    required bool rightPressed,
+  }) {
+    final buttonSpacing = isCompact ? 8.0 : 12.0;
+
+    return Column(
+      children: [
+        Expanded(
+          child: Row(
+            children: [
+              Expanded(
+                child: _DeadmanButton(
+                  label: isCompact ? 'UP' : 'HOIST\nUP',
+                  icon: Icons.arrow_upward_rounded,
+                  color: AppColors.upColor,
+                  colorLight: AppColors.upColorLight,
+                  isPressed: upPressed,
+                  isDisabled: isDisabled || downPressed,
+                  onPressed: _onUpPressed,
+                  onReleased: _onUpReleased,
+                  isCompact: isCompact,
+                ),
+              ),
+              SizedBox(width: buttonSpacing),
+              Expanded(
+                child: _DeadmanButton(
+                  label: isCompact ? 'DOWN' : 'HOIST\nDOWN',
+                  icon: Icons.arrow_downward_rounded,
+                  color: AppColors.downColor,
+                  colorLight: AppColors.downColorLight,
+                  isPressed: downPressed,
+                  isDisabled: isDisabled || upPressed,
+                  onPressed: _onDownPressed,
+                  onReleased: _onDownReleased,
+                  isCompact: isCompact,
+                ),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(height: isCompact ? 8 : 12),
+        Expanded(
+          child: Row(
+            children: [
+              Expanded(
+                child: _DeadmanButton(
+                  label: isCompact ? 'LEFT' : 'TRAVEL\nLEFT',
+                  icon: Icons.arrow_back_rounded,
+                  color: AppColors.leftColor,
+                  colorLight: AppColors.leftColorLight,
+                  isPressed: leftPressed,
+                  isDisabled: isDisabled || rightPressed,
+                  onPressed: _onLeftPressed,
+                  onReleased: _onLeftReleased,
+                  isCompact: isCompact,
+                ),
+              ),
+              SizedBox(width: buttonSpacing),
+              Expanded(
+                child: _DeadmanButton(
+                  label: isCompact ? 'RIGHT' : 'TRAVEL\nRIGHT',
+                  icon: Icons.arrow_forward_rounded,
+                  color: AppColors.rightColor,
+                  colorLight: AppColors.rightColorLight,
+                  isPressed: rightPressed,
+                  isDisabled: isDisabled || leftPressed,
+                  onPressed: _onRightPressed,
+                  onReleased: _onRightReleased,
+                  isCompact: isCompact,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   // ═══════════════════════════════════════════════════════════
   // Live LED Indicators
   // ═══════════════════════════════════════════════════════════
 
-  Widget _liveLEDs(CraneController controller) {
+  Widget _liveLEDs(CraneController controller, {required bool compact}) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 10 : 12,
+        vertical: compact ? 6 : 8,
+      ),
       decoration: BoxDecoration(
         color: ConnectionColors.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: ConnectionColors.border),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
+      child: Wrap(
+        spacing: compact ? 12 : 16,
+        runSpacing: compact ? 8 : 10,
+        alignment: WrapAlignment.center,
         children: [
           _ledIndicator(
             label: 'ESTOP',
             active: controller.ledEstop,
-            color:  AppColors.eStopColor,
+            color: AppColors.eStopColor,
             pinName: 'R0_0',
           ),
           _ledIndicator(
@@ -365,24 +514,34 @@ class _ControlScreenState extends State<ControlScreen>
             color: AppColors.downColor,
             pinName: 'Q0.2',
           ),
-          // Spacer for visual balance (no FAST)
-          const SizedBox(width: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: ConnectionColors.primarySoft,
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: const Text(
-              'HOLD-TO-RUN',
-              style: TextStyle(
-                color: ConnectionColors.primary,
-                fontSize: 8,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 1.0,
-              ),
-            ),
+          _ledIndicator(
+            label: 'LEFT',
+            active: controller.ledLeft || controller.leftHoldActive,
+            color: AppColors.leftColor,
+            pinName: 'Q0.3',
           ),
+          _ledIndicator(
+            label: 'RIGHT',
+            active: controller.ledRight || controller.rightHoldActive,
+            color: AppColors.rightColor,
+            pinName: 'Q0.4',
+          ),
+          // Container(
+          //   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          //   decoration: BoxDecoration(
+          //     color: ConnectionColors.primarySoft,
+          //     borderRadius: BorderRadius.circular(6),
+          //   ),
+          //   child: const Text(
+          //     'HOLD-TO-RUN',
+          //     style: TextStyle(
+          //       color: ConnectionColors.primary,
+          //       fontSize: 8,
+          //       fontWeight: FontWeight.w800,
+          //       letterSpacing: 1.0,
+          //     ),
+          //   ),
+          // ),
         ],
       ),
     );
@@ -405,7 +564,7 @@ class _ControlScreenState extends State<ControlScreen>
               width: 14,
               height: 14,
               decoration: BoxDecoration(
-                color: active ? color : (label == 'ESTOP' ?  Colors.green : Colors.grey.shade300),
+                color: active ? color : Colors.grey.shade300,
                 shape: BoxShape.circle,
                 boxShadow: active
                     ? [
@@ -445,31 +604,44 @@ class _ControlScreenState extends State<ControlScreen>
   // Status Bar
   // ═══════════════════════════════════════════════════════════
 
-  Widget _buildStatusBar(CraneController controller) {
+  Widget _buildStatusBar(CraneController controller, {bool isCompact = false}) {
     final Color c;
     final String status;
+    final hasAnyMotion = controller.upHoldActive ||
+        controller.downHoldActive ||
+        controller.leftHoldActive ||
+        controller.rightHoldActive;
     
     if (controller.estopLatched) {
       c = AppColors.eStopColor;
       status = 'EMERGENCY ACTIVE - SYSTEM LOCKED';
     } else if (controller.upHoldActive) {
       c = AppColors.upColor;
-      status = 'HOISTING UP — HOLD TO RUN';
+      status = isCompact ? 'UP - HOLD' : 'HOIST UP - HOLD TO RUN';
     } else if (controller.downHoldActive) {
       c = AppColors.downColor;
-      status = 'HOISTING DOWN — HOLD TO RUN';
+      status = isCompact ? 'DOWN - HOLD' : 'HOIST DOWN - HOLD TO RUN';
+    } else if (controller.leftHoldActive) {
+      c = AppColors.leftColor;
+      status = isCompact ? 'LEFT - HOLD' : 'TRAVEL LEFT - HOLD TO RUN';
+    } else if (controller.rightHoldActive) {
+      c = AppColors.rightColor;
+      status = isCompact ? 'RIGHT - HOLD' : 'TRAVEL RIGHT - HOLD TO RUN';
     } else {
       c = AppColors.idleColor;
-      status = 'IDLE — PRESS AND HOLD TO OPERATE';
+      status = isCompact ? 'IDLE' : 'IDLE — PRESS AND HOLD TO OPERATE';
     }
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      padding: EdgeInsets.symmetric(
+        horizontal: isCompact ? 10 : 14,
+        vertical: isCompact ? 6 : 8,
+      ),
       decoration: BoxDecoration(
         color: c.withAlpha(20),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(isCompact ? 8 : 10),
         border: Border.all(color: c.withAlpha(100)),
       ),
       child: Row(
@@ -477,24 +649,28 @@ class _ControlScreenState extends State<ControlScreen>
         children: [
           AnimatedContainer(
             duration: const Duration(milliseconds: 300),
-            width: 8,
-            height: 8,
+            width: isCompact ? 6 : 8,
+            height: isCompact ? 6 : 8,
             decoration: BoxDecoration(
               color: c,
               shape: BoxShape.circle,
-              boxShadow: (controller.upHoldActive || controller.downHoldActive)
+              boxShadow: hasAnyMotion
                   ? [BoxShadow(color: c.withAlpha(128), blurRadius: 6)]
                   : null,
             ),
           ),
-          const SizedBox(width: 10),
-          Text(
-            status,
-            style: TextStyle(
-              color: c,
-              fontWeight: FontWeight.bold,
-              fontSize: 12,
-              letterSpacing: 0.8,
+          SizedBox(width: isCompact ? 6 : 10),
+          Flexible(
+            child: Text(
+              status,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: c,
+                fontWeight: FontWeight.bold,
+                fontSize: isCompact ? 11 : 12,
+                letterSpacing: 0.8,
+              ),
             ),
           ),
         ],
@@ -536,12 +712,12 @@ class _ControlScreenState extends State<ControlScreen>
   // E-Stop Button
   // ═══════════════════════════════════════════════════════════
 
-  Widget _buildEStopButton() {
+  Widget _buildEStopButton({required bool compact}) {
     return GestureDetector(
       onTap: _onEStopTap,
       child: Container(
         width: double.infinity,
-        height: 58,
+        constraints: BoxConstraints(minHeight: compact ? 54 : 58),
         decoration: BoxDecoration(
           gradient: const LinearGradient(
             colors: [Color(0xFF6B0000), AppColors.eStopColor],
@@ -562,8 +738,8 @@ class _ControlScreenState extends State<ControlScreen>
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 34,
-              height: 34,
+              width: compact ? 32 : 34,
+              height: compact ? 32 : 34,
               decoration: BoxDecoration(
                 color: Colors.white.withAlpha(31),
                 shape: BoxShape.circle,
@@ -575,13 +751,15 @@ class _ControlScreenState extends State<ControlScreen>
                 size: 18,
               ),
             ),
-            const SizedBox(width: 12),
-            const Column(
+            SizedBox(width: compact ? 10 : 12),
+            Column(
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
+                const Text(
                   'EMERGENCY STOP',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 15,
@@ -591,7 +769,9 @@ class _ControlScreenState extends State<ControlScreen>
                 ),
                 Text(
                   'Tap to stop all crane operations',
-                  style: TextStyle(color: Colors.white60, fontSize: 10),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: Colors.white60, fontSize: compact ? 9 : 10),
                 ),
               ],
             ),
@@ -605,12 +785,92 @@ class _ControlScreenState extends State<ControlScreen>
   // E-Stop Reset Section
   // ═══════════════════════════════════════════════════════════
 
-  Widget _buildResetSection() {
+  Widget _buildResetSection({
+    required bool compact,
+    required bool landscape,
+  }) {
+    if (compact || landscape) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Container(
+              padding: EdgeInsets.all(compact ? 8 : 10),
+              decoration: BoxDecoration(
+                color: AppColors.eStopColor.withAlpha(25),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: AppColors.eStopColor.withAlpha(130),
+                  width: 2,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: compact ? 28 : 32,
+                    height: compact ? 28 : 32,
+                    decoration: const BoxDecoration(
+                      color: AppColors.eStopColor,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.warning_amber_rounded,
+                      color: Colors.white,
+                      size: 18,
+                    ),
+                  ),
+                  SizedBox(width: compact ? 8 : 10),
+                  const Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'EMERGENCY STOP ACTIVE',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: AppColors.eStopColorLight,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                            letterSpacing: 0.8,
+                          ),
+                        ),
+                        Text(
+                          'All crane controls are locked',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: ConnectionColors.textSecondary,
+                            fontSize: 10,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          SizedBox(width: compact ? 8 : 10),
+          Expanded(
+            child: EStopSwipeButton(
+              onActivated: _onResetEStopTap,
+              instructionTitle: compact ? 'RESET LOCKOUT' : 'SWIPE TO RESET',
+              instructionSubtitle: compact
+                  ? 'Slide right to clear emergency lockout'
+                  : 'Slide right to clear emergency lockout',
+            ),
+          ),
+        ],
+      );
+    }
+
     return Column(
       children: [
         Container(
           width: double.infinity,
-          padding: const EdgeInsets.all(10),
+          padding: EdgeInsets.all(compact ? 8 : 10),
           decoration: BoxDecoration(
             color: AppColors.eStopColor.withAlpha(25),
             borderRadius: BorderRadius.circular(12),
@@ -622,8 +882,8 @@ class _ControlScreenState extends State<ControlScreen>
           child: Row(
             children: [
               Container(
-                width: 32,
-                height: 32,
+                width: compact ? 30 : 32,
+                height: compact ? 30 : 32,
                 decoration: const BoxDecoration(
                   color: AppColors.eStopColor,
                   shape: BoxShape.circle,
@@ -634,7 +894,7 @@ class _ControlScreenState extends State<ControlScreen>
                   size: 18,
                 ),
               ),
-              const SizedBox(width: 10),
+              SizedBox(width: compact ? 8 : 10),
               const Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -661,13 +921,11 @@ class _ControlScreenState extends State<ControlScreen>
             ],
           ),
         ),
-        const SizedBox(height: 8),
+        SizedBox(height: compact ? 6 : 8),
         SizedBox(
           width: double.infinity,
           child: EStopSwipeButton(
-            onActivated: () {
-              _onResetEStopTap();
-            },
+            onActivated: _onResetEStopTap,
             instructionTitle: 'SWIPE TO RESET E-STOP',
             instructionSubtitle: 'Slide right to clear emergency lockout',
           ),
@@ -694,6 +952,7 @@ class _DeadmanButton extends StatefulWidget {
   final bool isDisabled;
   final Future<void> Function() onPressed;
   final Future<void> Function() onReleased;
+  final bool isCompact; // NEW
 
   const _DeadmanButton({
     required this.label,
@@ -704,13 +963,13 @@ class _DeadmanButton extends StatefulWidget {
     required this.isDisabled,
     required this.onPressed,
     required this.onReleased,
+    this.isCompact = false, // NEW
   });
 
   @override
   State<_DeadmanButton> createState() => _DeadmanButtonState();
 }
 
-// ✅ Use TickerProviderStateMixin (not SingleTickerProviderStateMixin)
 class _DeadmanButtonState extends State<_DeadmanButton>
     with TickerProviderStateMixin {
   
@@ -764,6 +1023,17 @@ class _DeadmanButtonState extends State<_DeadmanButton>
   Widget build(BuildContext context) {
     final isActive = widget.isPressed && !widget.isDisabled;
     final isDisabled = widget.isDisabled;
+    final compact = widget.isCompact;
+    
+    // Responsive sizing
+    final double iconSize = compact ? (isActive ? 28 : 24) : (isActive ? 36 : 30);
+    final double iconContainerSize = compact ? (isActive ? 52 : 44) : (isActive ? 72 : 64);
+    final double fontSize = compact ? (isActive ? 14 : 12) : (isActive ? 18 : 16);
+    final EdgeInsets padding = EdgeInsets.symmetric(
+      vertical: compact ? 12 : 24,
+      horizontal: compact ? 8 : 16,
+    );
+    final double instructionFontSize = compact ? 8.0 : 10.0;
 
     return Listener(
       onPointerDown: (_) {
@@ -786,7 +1056,7 @@ class _DeadmanButtonState extends State<_DeadmanButton>
             scale: scale,
             child: Container(
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(compact ? 16 : 20),
                 gradient: isActive
                     ? LinearGradient(
                         colors: [widget.color, widget.colorLight],
@@ -804,14 +1074,14 @@ class _DeadmanButtonState extends State<_DeadmanButton>
                       ? widget.colorLight
                       : isDisabled
                           ? AppColors.disabled
-                      : ConnectionColors.border,
+                          : ConnectionColors.border,
                   width: isActive ? 3 : 1.5,
                 ),
                 boxShadow: isActive
                     ? [
                         BoxShadow(
                           color: widget.color.withAlpha(128),
-                          blurRadius: 20 + (10 * glow),
+                          blurRadius: compact ? 12 + (6 * glow) : 20 + (10 * glow),
                           spreadRadius: 2,
                         ),
                         BoxShadow(
@@ -829,15 +1099,15 @@ class _DeadmanButtonState extends State<_DeadmanButton>
                       ],
               ),
               child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+                padding: padding,
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     // Icon
                     AnimatedContainer(
                       duration: const Duration(milliseconds: 200),
-                      width: isActive ? 72 : 64,
-                      height: isActive ? 72 : 64,
+                      width: iconContainerSize,
+                      height: iconContainerSize,
                       decoration: BoxDecoration(
                         color: isActive
                             ? Colors.white.withAlpha(40)
@@ -857,49 +1127,52 @@ class _DeadmanButtonState extends State<_DeadmanButton>
                             : isDisabled
                                 ? AppColors.disabled
                                 : widget.color,
-                        size: isActive ? 36 : 30,
+                        size: iconSize,
                       ),
                     ),
-                    const SizedBox(height: 14),
+                    SizedBox(height: compact ? 8 : 14),
                     // Label
                     Text(
                       widget.label,
                       textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: isActive
                             ? Colors.white
                             : isDisabled
                                 ? AppColors.disabled
                                 : ConnectionColors.textPrimary,
-                        fontSize: isActive ? 18 : 16,
+                        fontSize: fontSize,
                         fontWeight: FontWeight.w800,
                         height: 1.3,
                         letterSpacing: 1.2,
                       ),
                     ),
-                    const SizedBox(height: 8),
+                    SizedBox(height: compact ? 4 : 8),
                     // Instruction text
-                    AnimatedDefaultTextStyle(
-                      duration: const Duration(milliseconds: 200),
-                      style: TextStyle(
-                        color: isActive
-                            ? Colors.white.withAlpha(200)
-                            : isDisabled
-                                ? AppColors.disabled
-                                : ConnectionColors.textMuted,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
+                    if (!compact || isActive)
+                      AnimatedDefaultTextStyle(
+                        duration: const Duration(milliseconds: 200),
+                        style: TextStyle(
+                          color: isActive
+                              ? Colors.white.withAlpha(200)
+                              : isDisabled
+                                  ? AppColors.disabled
+                                  : ConnectionColors.textMuted,
+                          fontSize: instructionFontSize,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        child: Text(
+                          isActive ? 'RELEASE TO STOP' : 'HOLD TO RUN',
+                        ),
                       ),
-                      child: Text(
-                        isActive ? 'RELEASE TO STOP' : 'HOLD TO RUN',
-                      ),
-                    ),
                     // Active indicator bar
-                    const SizedBox(height: 10),
+                    SizedBox(height: compact ? 4 : 10),
                     AnimatedContainer(
                       duration: const Duration(milliseconds: 200),
-                      width: isActive ? 48 : 24,
-                      height: 4,
+                      width: isActive ? (compact ? 36 : 48) : (compact ? 16 : 24),
+                      height: compact ? 3 : 4,
                       decoration: BoxDecoration(
                         color: isActive ? Colors.white : Colors.transparent,
                         borderRadius: BorderRadius.circular(2),

@@ -385,7 +385,7 @@ class BleService {
   void _handleStatusNotification(List<int> bytes) {
     final command = PlcOutputCommand.fromStatusNotification(bytes);
     _logger.i(
-      'PLC status: estop=${command.estop} dir=${command.direction} speed=${command.speed}',
+      'PLC status: estop=${command.estop} up=${command.up} down=${command.down} left=${command.left} right=${command.right}',
     );
     if (command.estop || command.isIdle) {
       final pending = _pendingSafeStateCompleter;

@@ -54,6 +54,14 @@ class AppColors {
   static const Color downColor = Color(0xFF1F6FEB);
   static const Color downColorLight = Color(0xFF58A6FF);
 
+  // ── Traverse LEFT
+  static const Color leftColor = Color(0xFFC07800);
+  static const Color leftColorLight = Color(0xFFF2B84B);
+
+  // ── Traverse RIGHT
+  static const Color rightColor = Color(0xFF0F8B8D);
+  static const Color rightColorLight = Color(0xFF38BFC2);
+
   // ── FAST modifier
   static const Color fastColor = Color(0xFFD29922);
   static const Color fastColorLight = Color(0xFFE3B341);
