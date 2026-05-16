@@ -45,7 +45,7 @@ class _ControlScreenState extends State<ControlScreen>
     super.initState();
     _pulseController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 700),
+      duration: const Duration(milliseconds: 1200),
     )..repeat(reverse: true);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -479,6 +479,7 @@ class _ControlScreenState extends State<ControlScreen>
 
   Widget _liveLEDs(CraneController controller, {required bool compact}) {
     return Container(
+      width: double.infinity,
       padding: EdgeInsets.symmetric(
         horizontal: compact ? 10 : 12,
         vertical: compact ? 6 : 8,
@@ -493,12 +494,8 @@ class _ControlScreenState extends State<ControlScreen>
         runSpacing: compact ? 8 : 10,
         alignment: WrapAlignment.center,
         children: [
-          // E-STOP is always lit to communicate safety readiness state.
-          _ledIndicator(
-            label: 'ESTOP',
-            active: controller.estopLatched || controller.ledEstop,
-            color: AppColors.eStopColor,
-            inactiveColor: AppColors.upColorLight,
+          _eStopLedIndicator(
+            emergencyActive: controller.estopLatched || controller.ledEstop,
             pinName: 'R0_0',
           ),
           _ledIndicator(
@@ -543,6 +540,70 @@ class _ControlScreenState extends State<ControlScreen>
           // ),
         ],
       ),
+    );
+  }
+
+  Widget _eStopLedIndicator({
+    required bool emergencyActive,
+    required String pinName,
+  }) {
+    return AnimatedBuilder(
+      animation: _pulseController,
+      builder: (context, child) {
+        final pulse = Curves.easeInOut.transform(_pulseController.value);
+        final readyColor = Color.lerp(
+          AppColors.upColorLight.withAlpha(20),
+          const Color.fromARGB(255, 16, 154, 34),
+          pulse,
+        )!;
+        final ledColor = emergencyActive ? AppColors.eStopColor : readyColor;
+        final glowAlpha = emergencyActive
+            ? 170
+            : (85 + (pulse * 75)).round();
+        final glowRadius = emergencyActive
+            ? 7.0
+            : 3.5 + (pulse * 4.5);
+
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 14,
+              height: 14,
+              decoration: BoxDecoration(
+                color: ledColor,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: ledColor.withAlpha(glowAlpha),
+                    blurRadius: glowRadius,
+                    spreadRadius: 1,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              pinName,
+              style: const TextStyle(
+                fontSize: 8,
+                fontWeight: FontWeight.bold,
+                color: ConnectionColors.textSecondary,
+              ),
+            ),
+            Text(
+              'ESTOP',
+              style: TextStyle(
+                fontSize: 9,
+                color: emergencyActive
+                    ? AppColors.eStopColor
+                    : AppColors.upColorLight,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
