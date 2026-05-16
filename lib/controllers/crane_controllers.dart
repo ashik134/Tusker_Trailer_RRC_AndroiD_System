@@ -106,8 +106,9 @@ class CraneController extends ChangeNotifier {
   int get a1 => _analogValues['A1'] ?? 0;
   int get a2 => _analogValues['A2'] ?? 0;
 
-  // ── LED indicator states (sourced from PLC) ───────────────────────────────
-  bool get ledEstop => _estopLatched || _activeCommand.estop;
+  // ── LED indicator states ─────────────────────────────────────────────────
+  // Emergency indicator must represent the active lockout condition only.
+  bool get ledEstop => _estopLatched;
   bool get ledUp =>
       _activeCommand.direction == HoistDirection.up && !_activeCommand.estop;
   bool get ledDown =>

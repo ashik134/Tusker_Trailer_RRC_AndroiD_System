@@ -51,7 +51,7 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
-              duration: const Duration(seconds: 5),
+              duration: const Duration(seconds: 3),
               content: Row(
                 children: [
                   const Icon(
@@ -83,9 +83,9 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
     final controller = context.watch<CraneController>();
 
     return Scaffold(
-      backgroundColor: ConnectionColors.background,
+      // backgroundColor: ConnectionColors.background,
       appBar: AppBar(
-        backgroundColor: ConnectionColors.surface,
+        // backgroundColor: ConnectionColors.surface,
         elevation: 0,
         titleSpacing: 16,
         title: const Column(

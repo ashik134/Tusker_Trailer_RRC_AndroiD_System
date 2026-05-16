@@ -238,17 +238,20 @@ class _ControlScreenState extends State<ControlScreen>
               ],
             ),
             actions: [
-              IconButton(
-                icon: const Icon(
-                  Icons.bluetooth_disabled,
-                  size: 20,
-                  color: ConnectionColors.textSecondary,
-                ),
-                tooltip: 'Disconnect',
+              TextButton(
                 onPressed: () async {
                   await controller.releaseAllDirectionalHolds();
                   controller.disconnect();
                 },
+                
+                child: const Text(
+                  'SIGN OUT',
+                  style: TextStyle(
+                    color: ConnectionColors.textSecondary,
+                  ),
+                ),
+                
+               
               ),
             ],
             bottom: PreferredSize(
@@ -319,7 +322,7 @@ class _ControlScreenState extends State<ControlScreen>
                   const SizedBox(height: 8),
                   
                   // ── Safety Notice ────────────────────────
-                  _buildSafetyNotice(),
+                  // _buildSafetyNotice(),
                 ],
               ),
             ),
@@ -347,7 +350,7 @@ class _ControlScreenState extends State<ControlScreen>
           _ledIndicator(
             label: 'ESTOP',
             active: controller.ledEstop,
-            color: AppColors.eStopColor,
+            color:  AppColors.eStopColor,
             pinName: 'R0_0',
           ),
           _ledIndicator(
@@ -402,7 +405,7 @@ class _ControlScreenState extends State<ControlScreen>
               width: 14,
               height: 14,
               decoration: BoxDecoration(
-                color: active ? color : Colors.grey.shade300,
+                color: active ? color : (label == 'ESTOP' ?  Colors.green : Colors.grey.shade300),
                 shape: BoxShape.circle,
                 boxShadow: active
                     ? [
@@ -515,15 +518,15 @@ class _ControlScreenState extends State<ControlScreen>
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(Icons.safety_check_rounded, size: 14, color: ConnectionColors.warning),
-          SizedBox(width: 6),
-          Text(
-            'DEADMAN CONTROL: Release button to stop immediately',
-            style: TextStyle(
-              color: ConnectionColors.warning,
-              fontSize: 9,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
+          // SizedBox(width: 6),
+          // Text(
+          //   'DEADMAN CONTROL: Release button to stop immediately',
+          //   style: TextStyle(
+          //     color: ConnectionColors.warning,
+          //     fontSize: 9,
+          //     fontWeight: FontWeight.w600,
+          //   ),
+          // ),
         ],
       ),
     );

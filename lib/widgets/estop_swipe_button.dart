@@ -218,7 +218,7 @@ class _EStopSwipeButtonState extends State<EStopSwipeButton>
                                 children: [
                                   Text(
                                     widget.instructionTitle,
-                                    style: TextStyle(
+                                    style: const TextStyle(
                                       color: Colors.white70,
                                       fontSize: 13,
                                       fontWeight: FontWeight.bold,
@@ -227,7 +227,7 @@ class _EStopSwipeButtonState extends State<EStopSwipeButton>
                                   ),
                                   Text(
                                     widget.instructionSubtitle,
-                                    style: TextStyle(
+                                    style: const TextStyle(
                                       color: Colors.white38,
                                       fontSize: 9.5,
                                     ),

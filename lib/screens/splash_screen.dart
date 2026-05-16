@@ -39,7 +39,7 @@ class _StartupSplashScreenState extends State<StartupSplashScreen>
 
     _introController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 620),
+      duration: const Duration(milliseconds: 800),
     )..forward();
     _fadeAnimation = CurvedAnimation(
       parent: _introController,
@@ -86,8 +86,8 @@ class _StartupSplashScreenState extends State<StartupSplashScreen>
       Navigator.of(context).pushReplacement(
         PageRouteBuilder<void>(
           settings: const RouteSettings(name: '/connection'),
-          transitionDuration: const Duration(milliseconds: 560),
-          reverseTransitionDuration: const Duration(milliseconds: 380),
+          transitionDuration: const Duration(milliseconds: 800),
+          reverseTransitionDuration: const Duration(milliseconds: 800),
           pageBuilder: (routeContext, _, _) {
             return widget.destinationBuilder(routeContext);
           },
@@ -150,7 +150,7 @@ class _StartupSplashScreenState extends State<StartupSplashScreen>
                   children: [
                     Center(
                       child: Image.asset(
-                        'assets/images/splash_tusker.jpeg',
+                        'assets/images/Tusker logo.png',
                         fit: BoxFit.cover,
                       ),
                     ),

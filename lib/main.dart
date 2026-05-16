@@ -3,20 +3,23 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:tusker_trailer_rrc/utils/constants.dart';
+
 import 'package:tusker_trailer_rrc/theme/app_theme.dart';
+
 import 'package:tusker_trailer_rrc/screens/login_screen.dart';
+import 'package:tusker_trailer_rrc/screens/splash_screen.dart';
 import 'package:tusker_trailer_rrc/screens/control_screen.dart';
 import 'package:tusker_trailer_rrc/screens/connection_screen.dart';
-import 'package:tusker_trailer_rrc/screens/splash_screen.dart';
+
 import 'package:tusker_trailer_rrc/controllers/crane_controllers.dart';
 
 void main() {
    WidgetsFlutterBinding.ensureInitialized();
-  runApp(const CraneControlApp());
+  runApp(const TuskerRRCApp());
 }
 
-class CraneControlApp extends StatelessWidget {
-  const CraneControlApp({super.key});
+class TuskerRRCApp extends StatelessWidget {
+  const TuskerRRCApp({super.key});
 
   @override
   Widget build(BuildContext context) {
