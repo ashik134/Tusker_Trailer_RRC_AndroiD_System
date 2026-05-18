@@ -54,6 +54,7 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_native_splash: ^2.4.3
 
 flutter_launcher_icons:
   android: ic_launcher
@@ -68,16 +69,31 @@ flutter_launcher_icons:
   macos:
     generate: false
 
-# flutter_native_splash:
-#   color: "#F5F7FA"
-#   android: true
-#   ios: true
-#   web: false
-#   fullscreen: false
+flutter_native_splash:
+  # Light theme: white background.
+  color: "#FFFFFF"
+  # Dark theme: black background.
+  color_dark: "#000000"
 
-#   android_12:
-#     color: "#F5F7FA"
-#     icon_background_color: "#F5F7FA"
+  # Splash image — ONLY for native startup; launcher icon (app_icon3.png) is unchanged.
+  image: assets/images/app_icon4.png
+
+  android: true
+  ios: true
+  web: false
+  fullscreen: false
+
+  android_gravity: center
+  ios_content_mode: center
+
+  android_12:
+    # Light theme: white background + white icon circle (circle invisible on white).
+    color: "#FFFFFF"
+    icon_background_color: "#FFFFFF"
+    image: assets/images/app_icon4.png
+    # Dark theme: black background + black icon circle (circle invisible on black).
+    color_dark: "#000000"
+    icon_background_color_dark: "#000000"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -96,6 +112,7 @@ flutter:
     - assets/images/intellicontrol-icon-1024x1024 (6).png
     - assets/images/app_icon2.png
     - assets/images/app_icon3.png
+    - assets/images/app_icon4.png
     - assets/images/Tusker logo.png
     - assets/images/splash_tusker.jpeg
   #   - images/a_dot_ham.jpeg
