@@ -35,7 +35,6 @@ class ControlScreen extends StatefulWidget {
 
 class _ControlScreenState extends State<ControlScreen>
     with SingleTickerProviderStateMixin {
-
   late final AnimationController _pulseController;
   CraneController? _craneController;
   bool _wasDisconnected = false;
@@ -209,7 +208,7 @@ class _ControlScreenState extends State<ControlScreen>
     await controller.releaseAllDirectionalHolds();
     await controller.triggerEStop();
     Vibration.vibrate(duration: 600, amplitude: 255);
-    
+
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -233,11 +232,24 @@ class _ControlScreenState extends State<ControlScreen>
   Future<void> _onResetEStopTap() async {
     final controller = _craneController;
     if (controller == null) return;
-    if (controller.currentScreen != AppScreen.control || !controller.isConnected) {
+    if (controller.currentScreen != AppScreen.control ||
+        !controller.isConnected) {
       return;
     }
     await controller.resetEStop();
     Vibration.vibrate(duration: 100);
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // Deadman Control Handlers
+  // ═══════════════════════════════════════════════════════════
+
+  Future<void> _onDeadmanHeld(bool held) async {
+    await _craneController?.setDeadmanHeld(held);
+  }
+
+  void _onDeadmanLockToggle() {
+    _craneController?.toggleDeadmanLock();
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -345,15 +357,33 @@ class _ControlScreenState extends State<ControlScreen>
                         compact: isCompact,
                       ),
                       SizedBox(height: sectionSpacing),
-                      _liveLEDs(
-                        controller,
-                        compact: isCompact,
+                      IntrinsicHeight(
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Expanded(
+                              child: _liveLEDs(controller, compact: isCompact),
+                            ),
+                            const SizedBox(width: 8),
+                            _DeadmanControlButton(
+                              isHeld: controller.deadmanHeld,
+                              isLocked: controller.deadmanLocked,
+                              isEstopActive: controller.estopLatched,
+                              onHeld: _onDeadmanHeld,
+                              onLockToggle: _onDeadmanLockToggle,
+                              compact: isCompact,
+                            ),
+                          ],
+                        ),
                       ),
                       SizedBox(height: sectionSpacing),
                       Expanded(
                         child: _buildButtonGrid(
                           isCompact: isCompact,
-                          isDisabled: controller.estopLatched || !controller.isConnected,
+                          isDisabled:
+                              controller.estopLatched ||
+                              !controller.isConnected ||
+                              !controller.deadmanActive,
                           upPressed: controller.upHoldActive,
                           downPressed: controller.downHoldActive,
                           leftPressed: controller.leftHoldActive,
@@ -361,10 +391,7 @@ class _ControlScreenState extends State<ControlScreen>
                         ),
                       ),
                       SizedBox(height: sectionSpacing),
-                      _buildStatusBar(
-                        controller,
-                        isCompact: isCompact,
-                      ),
+                      _buildStatusBar(controller, isCompact: isCompact),
                     ],
                   ),
                 );
@@ -557,12 +584,8 @@ class _ControlScreenState extends State<ControlScreen>
           pulse,
         )!;
         final ledColor = emergencyActive ? AppColors.eStopColor : readyColor;
-        final glowAlpha = emergencyActive
-            ? 170
-            : (85 + (pulse * 75)).round();
-        final glowRadius = emergencyActive
-            ? 7.0
-            : 3.5 + (pulse * 4.5);
+        final glowAlpha = emergencyActive ? 170 : (85 + (pulse * 75)).round();
+        final glowRadius = emergencyActive ? 7.0 : 3.5 + (pulse * 4.5);
 
         return Column(
           mainAxisSize: MainAxisSize.min,
@@ -614,17 +637,16 @@ class _ControlScreenState extends State<ControlScreen>
     required String pinName,
     Color? inactiveColor,
   }) {
-    final targetColor = active ? color : (inactiveColor ?? Colors.grey.shade300);
+    final targetColor = active
+        ? color
+        : (inactiveColor ?? Colors.grey.shade300);
     final isLit = active || inactiveColor != null;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         TweenAnimationBuilder<Color?>(
-          tween: ColorTween(
-            begin: Colors.grey.shade300,
-            end: targetColor,
-          ),
+          tween: ColorTween(begin: Colors.grey.shade300, end: targetColor),
           duration: const Duration(milliseconds: 300),
           builder: (context, animatedColor, child) {
             final ledColor = animatedColor ?? targetColor;
@@ -675,11 +697,12 @@ class _ControlScreenState extends State<ControlScreen>
   Widget _buildStatusBar(CraneController controller, {bool isCompact = false}) {
     final Color c;
     final String status;
-    final hasAnyMotion = controller.upHoldActive ||
+    final hasAnyMotion =
+        controller.upHoldActive ||
         controller.downHoldActive ||
         controller.leftHoldActive ||
         controller.rightHoldActive;
-    
+
     if (controller.estopLatched) {
       c = AppColors.eStopColor;
       status = 'EMERGENCY ACTIVE - SYSTEM LOCKED';
@@ -695,6 +718,9 @@ class _ControlScreenState extends State<ControlScreen>
     } else if (controller.rightHoldActive) {
       c = AppColors.rightColor;
       status = isCompact ? 'RIGHT - HOLD' : 'TRAVEL RIGHT - HOLD TO RUN';
+    } else if (!controller.deadmanActive) {
+      c = const Color(0xFFD97706);
+      status = isCompact ? 'HOLD DEADMAN' : 'DEADMAN — HOLD TO ENABLE CONTROLS';
     } else {
       c = AppColors.idleColor;
       status = isCompact ? 'IDLE' : 'IDLE — PRESS AND HOLD TO OPERATE';
@@ -761,7 +787,11 @@ class _ControlScreenState extends State<ControlScreen>
       child: const Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.safety_check_rounded, size: 14, color: ConnectionColors.warning),
+          Icon(
+            Icons.safety_check_rounded,
+            size: 14,
+            color: ConnectionColors.warning,
+          ),
           // SizedBox(width: 6),
           // Text(
           //   'DEADMAN CONTROL: Release button to stop immediately',
@@ -839,7 +869,10 @@ class _ControlScreenState extends State<ControlScreen>
                   'Tap to stop all crane operations',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: Colors.white60, fontSize: compact ? 9 : 10),
+                  style: TextStyle(
+                    color: Colors.white60,
+                    fontSize: compact ? 9 : 10,
+                  ),
                 ),
               ],
             ),
@@ -910,8 +943,8 @@ class _ControlScreenState extends State<ControlScreen>
           ),
         ),
         SizedBox(height: compact ? 6 : 8),
-        SizedBox(
-          width: double.infinity,
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
           child: EStopSwipeButton(
             onActivated: () {
               _onResetEStopTap();
@@ -962,7 +995,6 @@ class _DeadmanButton extends StatefulWidget {
 
 class _DeadmanButtonState extends State<_DeadmanButton>
     with TickerProviderStateMixin {
-  
   late final AnimationController _pressAnim;
   late final Animation<double> _scaleAnim;
   late final AnimationController _glowAnim;
@@ -971,22 +1003,24 @@ class _DeadmanButtonState extends State<_DeadmanButton>
   @override
   void initState() {
     super.initState();
-    
+
     _pressAnim = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 80),
     );
-    _scaleAnim = Tween<double>(begin: 1.0, end: 0.95).animate(
-      CurvedAnimation(parent: _pressAnim, curve: Curves.easeIn),
-    );
-    
+    _scaleAnim = Tween<double>(
+      begin: 1.0,
+      end: 0.95,
+    ).animate(CurvedAnimation(parent: _pressAnim, curve: Curves.easeIn));
+
     _glowAnim = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1000),
     );
-    _glowOpacity = Tween<double>(begin: 0.5, end: 1.0).animate(
-      CurvedAnimation(parent: _glowAnim, curve: Curves.easeInOut),
-    );
+    _glowOpacity = Tween<double>(
+      begin: 0.5,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _glowAnim, curve: Curves.easeInOut));
   }
 
   @override
@@ -1014,11 +1048,17 @@ class _DeadmanButtonState extends State<_DeadmanButton>
     final isActive = widget.isPressed && !widget.isDisabled;
     final isDisabled = widget.isDisabled;
     final compact = widget.isCompact;
-    
+
     // Responsive sizing
-    final double iconSize = compact ? (isActive ? 28 : 24) : (isActive ? 36 : 30);
-    final double iconContainerSize = compact ? (isActive ? 52 : 44) : (isActive ? 72 : 64);
-    final double fontSize = compact ? (isActive ? 14 : 12) : (isActive ? 18 : 16);
+    final double iconSize = compact
+        ? (isActive ? 28 : 24)
+        : (isActive ? 36 : 30);
+    final double iconContainerSize = compact
+        ? (isActive ? 52 : 44)
+        : (isActive ? 72 : 64);
+    final double fontSize = compact
+        ? (isActive ? 14 : 12)
+        : (isActive ? 18 : 16);
     final EdgeInsets padding = EdgeInsets.symmetric(
       vertical: compact ? 12 : 24,
       horizontal: compact ? 8 : 16,
@@ -1041,7 +1081,7 @@ class _DeadmanButtonState extends State<_DeadmanButton>
         builder: (context, child) {
           final scale = widget.isPressed ? _scaleAnim.value : 1.0;
           final glow = widget.isPressed ? _glowOpacity.value : 0.0;
-          
+
           return Transform.scale(
             scale: scale,
             child: Container(
@@ -1057,21 +1097,23 @@ class _DeadmanButtonState extends State<_DeadmanButton>
                 color: isActive
                     ? null
                     : isDisabled
-                        ? AppColors.disabled.withAlpha(50)
-                        : ConnectionColors.surfaceAlt,
+                    ? AppColors.disabled.withAlpha(50)
+                    : ConnectionColors.surfaceAlt,
                 border: Border.all(
                   color: isActive
                       ? widget.colorLight
                       : isDisabled
-                          ? AppColors.disabled
-                          : ConnectionColors.border,
+                      ? AppColors.disabled
+                      : ConnectionColors.border,
                   width: isActive ? 3 : 1.5,
                 ),
                 boxShadow: isActive
                     ? [
                         BoxShadow(
                           color: widget.color.withAlpha(128),
-                          blurRadius: compact ? 12 + (6 * glow) : 20 + (10 * glow),
+                          blurRadius: compact
+                              ? 12 + (6 * glow)
+                              : 20 + (10 * glow),
                           spreadRadius: 2,
                         ),
                         BoxShadow(
@@ -1115,8 +1157,8 @@ class _DeadmanButtonState extends State<_DeadmanButton>
                         color: isActive
                             ? Colors.white
                             : isDisabled
-                                ? AppColors.disabled
-                                : widget.color,
+                            ? AppColors.disabled
+                            : widget.color,
                         size: iconSize,
                       ),
                     ),
@@ -1131,8 +1173,8 @@ class _DeadmanButtonState extends State<_DeadmanButton>
                         color: isActive
                             ? Colors.white
                             : isDisabled
-                                ? AppColors.disabled
-                                : ConnectionColors.textPrimary,
+                            ? AppColors.disabled
+                            : ConnectionColors.textPrimary,
                         fontSize: fontSize,
                         fontWeight: FontWeight.w800,
                         height: 1.3,
@@ -1148,8 +1190,8 @@ class _DeadmanButtonState extends State<_DeadmanButton>
                           color: isActive
                               ? Colors.white.withAlpha(200)
                               : isDisabled
-                                  ? AppColors.disabled
-                                  : ConnectionColors.textMuted,
+                              ? AppColors.disabled
+                              : ConnectionColors.textMuted,
                           fontSize: instructionFontSize,
                           fontWeight: FontWeight.w600,
                         ),
@@ -1161,7 +1203,9 @@ class _DeadmanButtonState extends State<_DeadmanButton>
                     SizedBox(height: compact ? 4 : 10),
                     AnimatedContainer(
                       duration: const Duration(milliseconds: 200),
-                      width: isActive ? (compact ? 36 : 48) : (compact ? 16 : 24),
+                      width: isActive
+                          ? (compact ? 36 : 48)
+                          : (compact ? 16 : 24),
                       height: compact ? 3 : 4,
                       decoration: BoxDecoration(
                         color: isActive ? Colors.white : Colors.transparent,
@@ -1171,6 +1215,269 @@ class _DeadmanButtonState extends State<_DeadmanButton>
                   ],
                 ),
               ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// Deadman Control Button — Operator-Presence Safety Lock
+//
+// Hold to enable motion. Release to kill all motion.
+// Hold 4 seconds to toggle LOCK mode (motion persists without holding).
+// ═══════════════════════════════════════════════════════════
+
+class _DeadmanControlButton extends StatefulWidget {
+  const _DeadmanControlButton({
+    required this.isHeld,
+    required this.isLocked,
+    required this.isEstopActive,
+    required this.onHeld,
+    required this.onLockToggle,
+    required this.compact,
+  });
+
+  final bool isHeld;
+  final bool isLocked;
+  final bool isEstopActive;
+  final Future<void> Function(bool held) onHeld;
+  final VoidCallback onLockToggle;
+  final bool compact;
+
+  @override
+  State<_DeadmanControlButton> createState() => _DeadmanControlButtonState();
+}
+
+class _DeadmanControlButtonState extends State<_DeadmanControlButton>
+    with TickerProviderStateMixin {
+  static const Duration _lockHoldDuration = Duration(seconds: 4);
+  static const Color _heldColor = Color(0xFFD97706); // amber-600
+  static const Color _lockedColor = Color(0xFF16A34A); // green-600
+
+  late final AnimationController _glowAnim;
+  late final AnimationController _progressAnim;
+  Timer? _lockTimer;
+  bool _pointerDown = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _glowAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..repeat(reverse: true);
+    _progressAnim = AnimationController(
+      vsync: this,
+      duration: _lockHoldDuration,
+    );
+  }
+
+  @override
+  void dispose() {
+    _glowAnim.dispose();
+    _progressAnim.dispose();
+    _lockTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(_DeadmanControlButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // When E-stop activates mid-press, abort the interaction cleanly.
+    if (widget.isEstopActive && !oldWidget.isEstopActive && _pointerDown) {
+      _pointerDown = false;
+      _lockTimer?.cancel();
+      _lockTimer = null;
+      _progressAnim.reset();
+      // onHeld(false) is intentionally skipped — triggerEStop() already cleared
+      // deadman state in the controller; calling it would be a no-op anyway.
+    }
+  }
+
+  void _onPointerDown() {
+    if (widget.isEstopActive) return; // E-stop blocks all deadman input.
+    _pointerDown = true;
+    widget.onHeld(true);
+    _progressAnim.forward(from: 0.0);
+    _lockTimer = Timer(_lockHoldDuration, () {
+      if (!_pointerDown) return;
+      widget.onLockToggle();
+      HapticFeedback.heavyImpact();
+      Vibration.vibrate(duration: 200, amplitude: 200);
+      _progressAnim.reset();
+    });
+  }
+
+  void _onPointerUp() {
+    if (!_pointerDown) return;
+    _pointerDown = false;
+    _lockTimer?.cancel();
+    _lockTimer = null;
+    _progressAnim.reset();
+    widget.onHeld(false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDisabled = widget.isEstopActive;
+    final isActive = !isDisabled && (widget.isHeld || widget.isLocked);
+    final isLocked = !isDisabled && widget.isLocked;
+    final compact = widget.compact;
+    final Color activeColor = isLocked ? _lockedColor : _heldColor;
+
+    return Listener(
+      onPointerDown: (_) => _onPointerDown(),
+      onPointerUp: (_) => _onPointerUp(),
+      onPointerCancel: (_) => _onPointerUp(),
+      child: AnimatedBuilder(
+        animation: Listenable.merge([_glowAnim, _progressAnim]),
+        builder: (context, _) {
+          final glow = isActive
+              ? Curves.easeInOut.transform(_glowAnim.value)
+              : 0.0;
+          final progress = _progressAnim.value;
+
+          return AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            width: compact ? 76.0 : 86.0,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(compact ? 12 : 14),
+              color: isDisabled
+                  ? AppColors.disabled.withAlpha(20)
+                  : isActive
+                  ? activeColor.withAlpha(25)
+                  : ConnectionColors.surfaceAlt,
+              border: Border.all(
+                color: isDisabled
+                    ? AppColors.disabled.withAlpha(60)
+                    : isActive
+                    ? activeColor
+                    : ConnectionColors.border,
+                width: isActive ? 2.0 : 1.5,
+              ),
+              boxShadow: isActive
+                  ? [
+                      BoxShadow(
+                        color: activeColor.withAlpha(
+                          (80 + (55 * glow)).round(),
+                        ),
+                        blurRadius: 6 + 5 * glow,
+                        spreadRadius: 1,
+                      ),
+                    ]
+                  : const [
+                      BoxShadow(
+                        color: Color(0x20000000),
+                        blurRadius: 4,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // Icon circle
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  width: compact ? 28 : 32,
+                  height: compact ? 28 : 32,
+                  decoration: BoxDecoration(
+                    color: isDisabled
+                        ? AppColors.disabled.withAlpha(25)
+                        : isActive
+                        ? activeColor.withAlpha(35)
+                        : ConnectionColors.primarySoft,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: isDisabled
+                          ? AppColors.disabled.withAlpha(50)
+                          : isActive
+                          ? activeColor.withAlpha(110)
+                          : ConnectionColors.primary.withAlpha(50),
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Icon(
+                    isDisabled
+                        ? Icons.block_rounded
+                        : isLocked
+                        ? Icons.lock_rounded
+                        : (widget.isHeld
+                              ? Icons.pan_tool_rounded
+                              : Icons.pan_tool_outlined),
+                    size: compact ? 13 : 15,
+                    color: isDisabled
+                        ? AppColors.disabled
+                        : isActive
+                        ? activeColor
+                        : ConnectionColors.primary,
+                  ),
+                ),
+                SizedBox(height: compact ? 4 : 5),
+                // Title
+                Text(
+                  'DEADMAN',
+                  style: TextStyle(
+                    color: isDisabled
+                        ? AppColors.disabled
+                        : isActive
+                        ? activeColor
+                        : ConnectionColors.textSecondary,
+                    fontSize: compact ? 6.5 : 7.5,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.6,
+                  ),
+                ),
+                SizedBox(height: compact ? 2 : 3),
+                // State label
+                AnimatedDefaultTextStyle(
+                  duration: const Duration(milliseconds: 200),
+                  style: TextStyle(
+                    color: isDisabled
+                        ? AppColors.eStopColor.withAlpha(180)
+                        : isActive
+                        ? activeColor
+                        : ConnectionColors.textMuted,
+                    fontSize: compact ? 7.0 : 8.0,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.4,
+                  ),
+                  child: Text(
+                    isDisabled
+                        ? 'E-STOP'
+                        : isLocked
+                        ? 'LOCKED'
+                        : (widget.isHeld ? 'ACTIVE' : 'HOLD'),
+                  ),
+                ),
+                // Long-press progress bar (reserved space always)
+                SizedBox(height: compact ? 5 : 6),
+                SizedBox(
+                  height: 3,
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: compact ? 8.0 : 10.0,
+                    ),
+                    child: progress > 0 && !isDisabled
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(2),
+                            child: LinearProgressIndicator(
+                              value: progress,
+                              backgroundColor: ConnectionColors.border
+                                  .withAlpha(80),
+                              valueColor: const AlwaysStoppedAnimation<Color>(
+                                _lockedColor,
+                              ),
+                              minHeight: 3,
+                            ),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                ),
+              ],
             ),
           );
         },

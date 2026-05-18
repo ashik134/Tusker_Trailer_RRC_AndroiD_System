@@ -299,7 +299,9 @@ class BleService {
     final device = _device;
     if (device != null && device.isConnected) {
       try {
-        await _sendSafeStateCommand().timeout(const Duration(milliseconds: 900));
+        await _sendSafeStateCommand().timeout(
+          const Duration(milliseconds: 900),
+        );
       } catch (_) {
         _logger.w('Safe-state cleanup write failed during disconnect.');
       }

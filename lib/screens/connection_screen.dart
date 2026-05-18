@@ -547,6 +547,7 @@ class _MiniStatCard extends StatelessWidget {
     );
   }
 }
+
 class _DevicesPanel extends StatelessWidget {
   const _DevicesPanel({required this.controller});
 
@@ -841,7 +842,7 @@ class _ConnectedDeviceCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 14),
-              
+
               // Device details
               Expanded(
                 child: Column(
@@ -872,7 +873,7 @@ class _ConnectedDeviceCard extends StatelessWidget {
                   ],
                 ),
               ),
-              
+
               // Status / Connecting indicator
               if (isConnecting)
                 const SizedBox(
@@ -885,7 +886,10 @@ class _ConnectedDeviceCard extends StatelessWidget {
                 )
               else
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(20),
@@ -916,15 +920,15 @@ class _ConnectedDeviceCard extends StatelessWidget {
                 ),
             ],
           ),
-          
+
           if (!isConnecting) ...[
             const SizedBox(height: 14),
-            
+
             // ── RSSI Bar ────────────────────────────────
             _RSSIBar(rssi: device.rssi),
-            
+
             const SizedBox(height: 14),
-            
+
             // ── Disconnect Button ───────────────────────
             SizedBox(
               width: double.infinity,
@@ -934,9 +938,7 @@ class _ConnectedDeviceCard extends StatelessWidget {
                 label: const Text('DISCONNECT'),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: ConnectionColors.error,
-                  side: BorderSide(
-                    color: ConnectionColors.error.withAlpha(80),
-                  ),
+                  side: BorderSide(color: ConnectionColors.error.withAlpha(80)),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -1010,7 +1012,7 @@ class _RSSIBar extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-          
+
           // Signal bars
           Expanded(
             child: Column(
@@ -1023,13 +1025,15 @@ class _RSSIBar extends StatelessWidget {
                   children: List.generate(5, (index) {
                     final isFilled = index < _filledBars;
                     final barHeight = 6.0 + (index * 4.0);
-                    
+
                     return Container(
                       width: 8,
                       height: barHeight,
                       margin: const EdgeInsets.only(right: 4),
                       decoration: BoxDecoration(
-                        color: isFilled ? _signalColor : ConnectionColors.border.withAlpha(150),
+                        color: isFilled
+                            ? _signalColor
+                            : ConnectionColors.border.withAlpha(150),
                         borderRadius: BorderRadius.circular(2),
                       ),
                     );
@@ -1050,9 +1054,9 @@ class _RSSIBar extends StatelessWidget {
               ],
             ),
           ),
-          
+
           const SizedBox(width: 8),
-          
+
           // Signal percentage
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1081,10 +1085,7 @@ class _RSSIBar extends StatelessWidget {
 // ═══════════════════════════════════════════════════════════
 
 class _PulsingDot extends StatefulWidget {
-  const _PulsingDot({
-    required this.size,
-    required this.color,
-  });
+  const _PulsingDot({required this.size, required this.color});
 
   final double size;
   final Color color;
@@ -1105,9 +1106,10 @@ class _PulsingDotState extends State<_PulsingDot>
       vsync: this,
       duration: const Duration(milliseconds: 1200),
     )..repeat(reverse: true);
-    _animation = Tween<double>(begin: 0.5, end: 1.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
+    _animation = Tween<double>(
+      begin: 0.5,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
   }
 
   @override

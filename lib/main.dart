@@ -14,7 +14,7 @@ import 'package:tusker_trailer_rrc/screens/connection_screen.dart';
 import 'package:tusker_trailer_rrc/controllers/crane_controllers.dart';
 
 void main() {
-   WidgetsFlutterBinding.ensureInitialized();
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const TuskerRRCApp());
 }
 
