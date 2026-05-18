@@ -126,8 +126,9 @@ class CraneController extends ChangeNotifier {
   bool get ledFast =>
       _activeCommand.speed == HoistSpeed.fast && !_activeCommand.estop;
 
-  // ── Connected device name ─────────────────────────────────────────────────
+  // ── Connected device info ─────────────────────────────────────────────────
   String? get connectedDeviceName => _transportConnState.connectedDevice?.name;
+  int? get connectedDeviceRssi => _transportConnState.connectedDevice?.rssi;
 
   // ── Hoist state derived from active command ───────────────────────────────
   HoistState get hoistState {

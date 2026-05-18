@@ -262,70 +262,136 @@ class _ControlScreenState extends State<ControlScreen>
         return Scaffold(
           backgroundColor: ConnectionColors.background,
           resizeToAvoidBottomInset: false,
+          // For compact screens, use this layout:
           appBar: AppBar(
             backgroundColor: ConnectionColors.surface,
             elevation: 0,
             automaticallyImplyLeading: false,
-            titleSpacing: 12,
-            title: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
+            titleSpacing: 0,
+
+            // ── Leading: Device Icon ──────────────────────────
+            leading: Container(
+              margin: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: ConnectionColors.primarySoft,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                Icons.developer_board_rounded,
+                color: ConnectionColors.primary,
+                size: 22,
+              ),
+            ),
+
+            // ── Title: Device Info ────────────────────────────
+            title: Row(
               children: [
-                Text(
-                  controller.connectedDeviceName ?? BLEConstants.deviceName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: ConnectionColors.textPrimary,
-                  ),
-                ),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 7,
-                      height: 7,
-                      margin: const EdgeInsets.only(right: 5),
-                      decoration: BoxDecoration(
-                        color: controller.isConnected
-                            ? AppColors.upColorLight
-                            : AppColors.danger,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    Flexible(
-                      child: Text(
-                        controller.isConnected ? 'Connected' : 'Disconnected',
+                // Device name & status
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Device name
+                      Text(
+                        controller.connectedDeviceName ??
+                            BLEConstants.deviceName,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: controller.isConnected
-                              ? AppColors.upColorLight
-                              : AppColors.danger,
-                          fontSize: 10,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: ConnectionColors.textPrimary,
+                          letterSpacing: -0.2,
                         ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 2),
+                      // Status row with animated dot
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _StatusDot(isConnected: controller.isConnected),
+                          const SizedBox(width: 6),
+                          Text(
+                            controller.isConnected
+                                ? 'Connected'
+                                : 'Disconnected',
+                            style: TextStyle(
+                              color: controller.isConnected
+                                  ? ConnectionColors.connected
+                                  : ConnectionColors.error,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (controller.isConnected) ...[
+                            const SizedBox(width: 8),
+                            // RSSI badge (if available)
+                            _RSSIBadge(rssi: controller.connectedDeviceRssi),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
+
+            // ── Actions ───────────────────────────────────────
             actions: [
-              TextButton(
+              // Connection info tooltip
+              if (controller.isConnected)
+                Tooltip(
+                  message:
+                      'Device: ${controller.connectedDeviceName}\n'
+                      'RSSI: ${controller.connectedDeviceRssi ?? "N/A"} dBm\n'
+                      'Status: Authenticated',
+                  child: Container(
+                    margin: const EdgeInsets.only(right: 4),
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: ConnectionColors.connectedBg,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(
+                      Icons.info_outline_rounded,
+                      color: ConnectionColors.connected,
+                      size: 18,
+                    ),
+                  ),
+                ),
+
+              // Sign out button
+              TextButton.icon(
                 onPressed: () async {
                   await controller.releaseAllDirectionalHolds();
                   controller.disconnect();
                 },
-                child: const Text(
+                icon: const Icon(
+                  Icons.logout_rounded,
+                  size: 16,
+                  color: ConnectionColors.textSecondary,
+                ),
+                label: const Text(
                   'SIGN OUT',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: ConnectionColors.textSecondary),
+                  style: TextStyle(
+                    color: ConnectionColors.textSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
               ),
+              const SizedBox(width: 4),
             ],
+
+            // ── Bottom Divider ─────────────────────────────────
             bottom: PreferredSize(
               preferredSize: const Size.fromHeight(1),
               child: Container(height: 1, color: ConnectionColors.divider),
@@ -1253,7 +1319,7 @@ class _DeadmanControlButton extends StatefulWidget {
 
 class _DeadmanControlButtonState extends State<_DeadmanControlButton>
     with TickerProviderStateMixin {
-  static const Duration _lockHoldDuration = Duration(seconds: 4);
+  static const Duration _lockHoldDuration = Duration(seconds: 2);
   static const Color _heldColor = Color(0xFFD97706); // amber-600
   static const Color _lockedColor = Color(0xFF16A34A); // green-600
 
@@ -1481,6 +1547,129 @@ class _DeadmanControlButtonState extends State<_DeadmanControlButton>
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _StatusDot extends StatefulWidget {
+  const _StatusDot({required this.isConnected});
+
+  final bool isConnected;
+
+  @override
+  State<_StatusDot> createState() => _StatusDotState();
+}
+
+class _StatusDotState extends State<_StatusDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulseController;
+  late final Animation<double> _pulseAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    );
+    _pulseAnimation = Tween<double>(begin: 0.6, end: 1.0).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+
+    if (widget.isConnected) {
+      _pulseController.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void didUpdateWidget(_StatusDot oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isConnected && !oldWidget.isConnected) {
+      _pulseController.repeat(reverse: true);
+    } else if (!widget.isConnected && oldWidget.isConnected) {
+      _pulseController.stop();
+      _pulseController.reset();
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = widget.isConnected
+        ? ConnectionColors.connected
+        : ConnectionColors.error;
+
+    return AnimatedBuilder(
+      animation: _pulseAnimation,
+      builder: (context, child) {
+        final opacity = widget.isConnected ? _pulseAnimation.value : 1.0;
+
+        return Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            color: color.withAlpha((255 * opacity).toInt()),
+            shape: BoxShape.circle,
+            boxShadow: widget.isConnected
+                ? [
+                    BoxShadow(
+                      color: color.withAlpha((77 * opacity).toInt()),
+                      blurRadius: 4,
+                      spreadRadius: 1,
+                    ),
+                  ]
+                : null,
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _RSSIBadge extends StatelessWidget {
+  const _RSSIBadge({required this.rssi});
+
+  final int? rssi;
+
+  Color get _rssiColor {
+    if (rssi == null) return ConnectionColors.textMuted;
+    if (rssi! >= -60) return ConnectionColors.connected;
+    if (rssi! >= -80) return ConnectionColors.warning;
+    return ConnectionColors.error;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (rssi == null) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: _rssiColor.withAlpha(20),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: _rssiColor.withAlpha(60), width: 0.5),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.signal_cellular_alt_rounded, size: 10, color: _rssiColor),
+          const SizedBox(width: 3),
+          Text(
+            '$rssi',
+            style: TextStyle(
+              color: _rssiColor,
+              fontSize: 9,
+              fontWeight: FontWeight.w700,
+              fontFamily: 'monospace',
+            ),
+          ),
+        ],
       ),
     );
   }
