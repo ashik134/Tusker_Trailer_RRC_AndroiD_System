@@ -167,7 +167,7 @@ class _StartupSplashScreenState extends State<StartupSplashScreen>
                     // ),
                     const SizedBox(height: 8),
                     const Text(
-                      'Industrial Crane Control System',
+                      'Trailer Remote Control System',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: _textSecondary,

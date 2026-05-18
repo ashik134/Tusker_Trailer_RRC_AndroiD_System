@@ -7,9 +7,9 @@
         <item name="android:windowFullscreen">false</item>
         <item name="android:windowDrawsSystemBarBackgrounds">false</item>
         <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
-        <item name="android:windowSplashScreenBackground">#000000</item>
+        <item name="android:windowSplashScreenBackground">#FFFFF8</item>
         <item name="android:windowSplashScreenAnimatedIcon">@drawable/android12splash</item>
-        <item name="android:windowSplashScreenIconBackgroundColor">#000000</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">#FFFFF8</item>
     </style>
     <!-- White post-splash window to avoid dark flashes before first Flutter frame -->
     <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
