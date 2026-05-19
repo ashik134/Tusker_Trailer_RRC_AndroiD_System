@@ -76,6 +76,12 @@ class BleService {
   Completer<void>? _pendingSafeStateCompleter;
   bool _isDisposing = false;
 
+  // ── Live RSSI polling ───────────────────────────────────────────────────────
+  Timer? _rssiTimer;
+
+  // ── Continuous scan control ─────────────────────────────────────────────────
+  bool _scanShouldContinue = false;
+
   static const int _safeStateMaxAttempts = 3;
   static const Duration _safeStateAckTimeout = Duration(milliseconds: 1200);
 
@@ -97,7 +103,12 @@ class BleService {
     await stopScan();
     _scanController.add(const []);
     _emit(BleConnectionStatus.scanning);
+    _scanShouldContinue = true;
 
+    // Single persistent subscription for the entire scan session.
+    // FlutterBluePlus.scanResults emits the full, de-duplicated list of all
+    // seen devices with their LATEST RSSI on every new advertisement —
+    // so RSSI is live throughout the session without extra work.
     _scanResultsSub = FlutterBluePlus.scanResults.listen(
       (results) {
         final seen = <String>{};
@@ -129,14 +140,33 @@ class BleService {
       },
     );
 
-    await FlutterBluePlus.startScan(timeout: const Duration(seconds: 10));
-    await FlutterBluePlus.isScanning.where((s) => !s).first;
+    // Continuous scan loop: run 8-second bursts with a brief gap so that
+    // FlutterBluePlus keeps receiving fresh advertisements (and thus fresh
+    // RSSI values) for as long as the user is on the scan page.
+    while (_scanShouldContinue && !_isDisposing) {
+      try {
+        await FlutterBluePlus.startScan(
+          timeout: const Duration(seconds: 8),
+          androidScanMode: AndroidScanMode.balanced,
+        );
+        await FlutterBluePlus.isScanning.where((s) => !s).first;
+      } catch (_) {
+        break;
+      }
+      if (!_scanShouldContinue || _isDisposing) break;
+      // Brief gap between bursts to let the radio rest.
+      await Future.delayed(const Duration(milliseconds: 400));
+    }
+
     _scanResultsSub?.cancel();
     _scanResultsSub = null;
-    _emit(BleConnectionStatus.disconnected);
+    if (_snapshot.status == BleConnectionStatus.scanning) {
+      _emit(BleConnectionStatus.disconnected);
+    }
   }
 
   Future<void> stopScan() async {
+    _scanShouldContinue = false; // Break the continuous scan loop.
     await FlutterBluePlus.stopScan();
     _scanResultsSub?.cancel();
     _scanResultsSub = null;
@@ -288,6 +318,7 @@ class BleService {
   }
 
   Future<void> disconnect({bool emitState = true}) async {
+    _stopRssiPolling(); // Stop polling before tearing down the BLE link.
     _pendingAuthCompleter?.complete(BleAuthOutcome.failed);
     _pendingAuthCompleter = null;
     final pendingSafeState = _pendingSafeStateCompleter;
@@ -337,6 +368,7 @@ class BleService {
     if (_isDisposing) {
       return;
     }
+    _stopRssiPolling();
     _device = null;
     _connectedDevice = null;
     _connStateSub?.cancel();
@@ -502,6 +534,7 @@ class BleService {
       _emit(BleConnectionStatus.authenticated);
       _pendingAuthCompleter?.complete(BleAuthOutcome.success);
       _pendingAuthCompleter = null;
+      _startRssiPolling(); // Begin live RSSI updates now that the session is fully up.
     } catch (error) {
       _pendingAuthCompleter?.complete(BleAuthOutcome.failed);
       _pendingAuthCompleter = null;
@@ -559,6 +592,47 @@ class BleService {
     }
   }
 
+  // ── Live RSSI helpers ─────────────────────────────────────────────────────
+
+  /// Starts periodic RSSI polling (every 3 s) for the active connection.
+  /// On each tick: reads RSSI from the BLE device, reconstructs
+  /// [_connectedDevice] with the fresh value, then re-emits the current
+  /// connection state so every UI consumer rebuilds with live signal strength.
+  void _startRssiPolling() {
+    _rssiTimer?.cancel();
+    _rssiTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
+      final device = _device;
+      final connectedDevice = _connectedDevice;
+      if (device == null ||
+          !device.isConnected ||
+          connectedDevice == null ||
+          _isDisposing) {
+        return;
+      }
+      try {
+        final rssi = await device.readRssi();
+        // Reconstruct with fresh RSSI (rssi field is final on BleScanDevice).
+        _connectedDevice = BleScanDevice(
+          id: connectedDevice.id,
+          name: connectedDevice.name,
+          rssi: rssi,
+          device: connectedDevice.device,
+        );
+        // Re-emit the same connection status — the controller's stream listener
+        // will pick up the new connectedDevice and call notifyListeners(),
+        // propagating the fresh RSSI to all UI consumers.
+        _emit(_snapshot.status);
+      } catch (e) {
+        _logger.w('RSSI poll failed: $e');
+      }
+    });
+  }
+
+  void _stopRssiPolling() {
+    _rssiTimer?.cancel();
+    _rssiTimer = null;
+  }
+
   // ── Write helpers ──────────────────────────────────────────────────────────
 
   Future<void> writeDigital(List<int> bytes) async {
@@ -584,6 +658,7 @@ class BleService {
 
   void dispose() {
     _isDisposing = true;
+    _stopRssiPolling();
     _scanResultsSub?.cancel();
     _analogSubscription?.cancel();
     _authSubscription?.cancel();

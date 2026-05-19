@@ -765,7 +765,6 @@ class _SignalPill extends StatelessWidget {
         : rssi >= -80
         ? ConnectionColors.warning
         : ConnectionColors.error;
-    final barValue = (((rssi + 100) / 50).clamp(0.05, 1.0)).toDouble();
 
     return Row(
       children: [

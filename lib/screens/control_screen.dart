@@ -276,7 +276,7 @@ class _ControlScreenState extends State<ControlScreen>
                 color: ConnectionColors.primarySoft,
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Icon(
+              child: const Icon(
                 Icons.developer_board_rounded,
                 color: ConnectionColors.primary,
                 size: 22,
@@ -833,40 +833,6 @@ class _ControlScreenState extends State<ControlScreen>
               ),
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  // ═══════════════════════════════════════════════════════════
-  // Safety Notice
-  // ═══════════════════════════════════════════════════════════
-
-  Widget _buildSafetyNotice() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: ConnectionColors.warning.withAlpha(25),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: ConnectionColors.warning.withAlpha(50)),
-      ),
-      child: const Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.safety_check_rounded,
-            size: 14,
-            color: ConnectionColors.warning,
-          ),
-          // SizedBox(width: 6),
-          // Text(
-          //   'DEADMAN CONTROL: Release button to stop immediately',
-          //   style: TextStyle(
-          //     color: ConnectionColors.warning,
-          //     fontSize: 9,
-          //     fontWeight: FontWeight.w600,
-          //   ),
-          // ),
         ],
       ),
     );
