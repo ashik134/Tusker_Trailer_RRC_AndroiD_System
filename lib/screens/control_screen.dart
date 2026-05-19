@@ -288,97 +288,45 @@ class _ControlScreenState extends State<ControlScreen>
   // Back Navigation Guard
   // ═══════════════════════════════════════════════════════════
 
-  /// Called when Android back gesture / system back is intercepted on the
-  /// Control Screen.  Immediately releases any active motion holds (safety
-  /// first), then asks the operator to confirm before disconnecting.
+  /// Called when Android back gesture / system back 
   Future<void> _onBackAttempted(
-    BuildContext context,
-    CraneController controller,
-  ) async {
-    // Safety: stop all crane motion the instant back navigation is detected.
-    await controller.releaseAllDirectionalHolds();
+  BuildContext context,
+  CraneController controller,
+) async {
+  // Safety: stop all crane motion immediately
+  await controller.releaseAllDirectionalHolds();
 
-    if (!mounted) return;
+  if (!mounted) return;
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogCtx) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        title: const Row(
-          children: [
-            Icon(
-              Icons.warning_amber_rounded,
-              color: ConnectionColors.warning,
-              size: 22,
-            ),
-            SizedBox(width: 8),
-            Text(
-              'Exit Control Screen?',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ],
-        ),
-        content: const Text(
-          'Leaving the control screen will disconnect from the crane '
-          'controller.\n\nEnsure the crane is in a safe, stopped position '
-          'before exiting.',
-          style: TextStyle(
-            color: ConnectionColors.textSecondary,
-            fontSize: 13.5,
-            height: 1.5,
-          ),
-        ),
-        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-        actions: [
-          OutlinedButton(
-            onPressed: () => Navigator.of(dialogCtx).pop(false),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: ConnectionColors.primary,
-              side: const BorderSide(color: ConnectionColors.primary),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 20,
-                vertical: 12,
-              ),
-            ),
-            child: const Text(
-              'STAY',
-              style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 0.6),
-            ),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogCtx).pop(true),
-            style: FilledButton.styleFrom(
-              backgroundColor: ConnectionColors.error,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 12,
-              ),
-            ),
-            child: const Text(
-              'DISCONNECT & EXIT',
-              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
-            ),
-          ),
-        ],
-      ),
-    );
+  // Delegate dialog to a method that takes NO BuildContext from outer scope
+  final confirmed = await _showExitConfirmationDialog();
 
-    if (confirmed == true && mounted) {
-      await controller.disconnect();
-    }
+  if (!mounted) return;
+
+  if (confirmed == true) {
+    await controller.disconnect();
   }
+}
+
+/// Shows exit confirmation dialog.
+/// This method is safe because it only uses the context
+/// provided directly to [showDialog].
+Future<bool?> _showExitConfirmationDialog() {
+  // Use widget's context directly — only valid when called synchronously
+  // from a mounted widget
+  assert(mounted, 'Cannot show dialog when widget is not mounted');
+
+  return showDialog<bool>(
+    context: context,
+    barrierDismissible: false,
+    builder: (dialogCtx) => _ExitConfirmationDialog(),
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// Exit Confirmation Dialog (Stateless — no BuildContext stored)
+// ═══════════════════════════════════════════════════════════
+
 
   // ═══════════════════════════════════════════════════════════
   // Build
@@ -1113,7 +1061,7 @@ class _ControlScreenState extends State<ControlScreen>
         ),
         SizedBox(height: compact ? 6 : 8),
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
           child: EStopSwipeButton(
             onActivated: () {
               _onResetEStopTap();
@@ -1774,6 +1722,81 @@ class _RSSIBadge extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+class _ExitConfirmationDialog extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      title: const Row(
+        children: [
+          Icon(
+            Icons.warning_amber_rounded,
+            color: ConnectionColors.warning,
+            size: 22,
+          ),
+          SizedBox(width: 8),
+          Text(
+            'Exit Control Screen?',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+      content: const Text(
+        'Leaving the control screen will disconnect from the crane '
+        'controller.\n\nEnsure the crane is in a safe, stopped position '
+        'before exiting.',
+        style: TextStyle(
+          color: ConnectionColors.textSecondary,
+          fontSize: 13.5,
+          height: 1.5,
+        ),
+      ),
+      actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+      actions: [
+        OutlinedButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: ConnectionColors.primary,
+            side: const BorderSide(color: ConnectionColors.primary),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 20,
+              vertical: 12,
+            ),
+          ),
+          child: const Text(
+            'STAY',
+            style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 0.6),
+          ),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          style: FilledButton.styleFrom(
+            backgroundColor: ConnectionColors.error,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 12,
+            ),
+          ),
+          child: const Text(
+            'DISCONNECT & EXIT',
+            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+          ),
+        ),
+      ],
     );
   }
 }
