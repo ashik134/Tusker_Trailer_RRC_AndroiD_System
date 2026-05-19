@@ -46,20 +46,25 @@ class _ControlScreenState extends State<ControlScreen>
   DateTime? _lastHardwareEStopTime;
   static const Duration _hardwareEStopCooldown = Duration(milliseconds: 1500);
 
+  // ── Inactivity sleep mode ───────────────────────────────────────────────────
+  // When Emergency Stop is active and no operator interaction is detected
+  // for [_inactivityTimeout], the screen enters a full-screen sleep overlay
+  // that blocks all control input.  The system stays in sleep until the
+  // operator taps the overlay (returning to the E-stop active state).
+  // Motion remains blocked until the operator completes the E-stop reset flow.
+  bool _sleepMode = false;
+  Timer? _inactivityTimer;
+  static const Duration _inactivityTimeout = Duration(minutes: 2);
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
     // ── Operational lock-down ─────────────────────────────────────────────
-    // Enter sticky immersive mode: hides the system navigation bar and
-    // status bar. Android will show the nav bar temporarily on the first
-    // swipe from the bottom edge, but it auto-hides again — meaning one
-    // accidental swipe no longer immediately triggers Home/Recents.
-    // This is the strongest gesture guard available to non-device-owner apps.
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 
-    // Keep the screen alive so the display never times out mid-operation.
+    
     WakelockPlus.enable();
 
     // ── Hardware volume-key E-stop ────────────────────────────────────────
@@ -94,20 +99,11 @@ class _ControlScreenState extends State<ControlScreen>
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     WakelockPlus.disable();
     _pulseController.dispose();
+    _inactivityTimer?.cancel();
     _craneController?.removeListener(_onControllerChange);
     super.dispose();
   }
 
-  /// Lifecycle observer — enforces safe state on every foreground loss.
-  ///
-  /// | Lifecycle event          | Android trigger                          |
-  /// |--------------------------|------------------------------------------|
-  /// | paused                   | screen off, lock, home, task-switch, kill|
-  /// | detached                 | engine destruction / forced termination  |
-  /// | resumed                  | app returns to foreground                |
-  ///
-  /// The power button cannot be intercepted by normal third-party apps;
-  /// screen-off is detected reliably here via [AppLifecycleState.paused].
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
@@ -141,8 +137,18 @@ class _ControlScreenState extends State<ControlScreen>
         ),
       );
     }
-
     _wasDisconnected = isDisconnected;
+
+    // ── Inactivity timer sync with E-stop state ─────────────────────────
+    if (!controller.estopLatched) {
+      // E-stop cleared — cancel countdown and exit sleep immediately.
+      _inactivityTimer?.cancel();
+      _inactivityTimer = null;
+      if (_sleepMode) _exitSleepMode();
+    } else if (!_sleepMode && _inactivityTimer == null) {
+      // E-stop just became active and no timer is running yet — start it.
+      _resetInactivityTimer();
+    }
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -151,6 +157,7 @@ class _ControlScreenState extends State<ControlScreen>
 
   /// UP button pressed — request UP hold via centralized state engine
   Future<void> _onUpPressed() async {
+    _resetInactivityTimer();
     final controller = _craneController;
     if (controller == null) return;
     if (controller.estopLatched || !controller.isConnected) return;
@@ -180,6 +187,7 @@ class _ControlScreenState extends State<ControlScreen>
 
   /// DOWN button pressed — request DOWN hold via centralized state engine
   Future<void> _onDownPressed() async {
+    _resetInactivityTimer();
     final controller = _craneController;
     if (controller == null) return;
     if (controller.estopLatched || !controller.isConnected) return;
@@ -208,6 +216,7 @@ class _ControlScreenState extends State<ControlScreen>
   }
 
   Future<void> _onLeftPressed() async {
+    _resetInactivityTimer();
     final controller = _craneController;
     if (controller == null) return;
     if (controller.estopLatched || !controller.isConnected) return;
@@ -235,6 +244,7 @@ class _ControlScreenState extends State<ControlScreen>
   }
 
   Future<void> _onRightPressed() async {
+    _resetInactivityTimer();
     final controller = _craneController;
     if (controller == null) return;
     if (controller.estopLatched || !controller.isConnected) return;
@@ -293,6 +303,7 @@ class _ControlScreenState extends State<ControlScreen>
   }
 
   Future<void> _onResetEStopTap() async {
+    _resetInactivityTimer(); // Operator is present — reset the countdown.
     final controller = _craneController;
     if (controller == null) return;
     if (controller.currentScreen != AppScreen.control ||
@@ -308,7 +319,48 @@ class _ControlScreenState extends State<ControlScreen>
   // ═══════════════════════════════════════════════════════════
 
   Future<void> _onDeadmanHeld(bool held) async {
+    _resetInactivityTimer();
     await _craneController?.setDeadmanHeld(held);
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // Inactivity Sleep Mode
+  // ═══════════════════════════════════════════════════════════
+
+  /// Resets (or starts) the 5-minute inactivity countdown.
+  ///
+  /// No-op when not mounted, already in sleep mode, or E-stop is not active.
+  /// Calling this at the top of every interaction handler ensures the timer
+  /// restarts from zero on any operator touch, regardless of what the touch does.
+  void _resetInactivityTimer() {
+    if (!mounted || _sleepMode) return;
+    final controller = _craneController;
+    if (controller == null || !controller.estopLatched) return;
+    _inactivityTimer?.cancel();
+    _inactivityTimer = Timer(_inactivityTimeout, _enterSleepMode);
+  }
+
+  /// Activates sleep mode after [_inactivityTimeout] with no operator input.
+  ///
+  /// Inserts a full-screen [_SleepModeOverlay] via [Overlay] so it covers
+  /// the entire control UI.  E-stop remains latched — all outputs stay OFF.
+  void _enterSleepMode() {
+    if (!mounted || _sleepMode) return;
+    _inactivityTimer?.cancel();
+    _inactivityTimer = null;
+    HapticFeedback.heavyImpact();
+    setState(() => _sleepMode = true);
+  }
+
+  /// Returns from sleep to the E-stop active state.
+  ///
+  /// Removes the overlay and restarts the inactivity countdown.
+  /// Motion remains blocked — the operator must complete the swipe-to-reset
+  /// flow before any crane movement is possible.
+  void _exitSleepMode() {
+    if (!mounted) return;
+    setState(() => _sleepMode = false);
+    _resetInactivityTimer(); // Restart countdown — E-stop is still latched.
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -537,7 +589,7 @@ class _ControlScreenState extends State<ControlScreen>
                     // Step 2: Guard — check if still mounted before using context
                     if (!context.mounted) return;
 
-                    // Step 3: Now safe to call _onBackAttempted with context
+                    // Step 3: _onBackAttempted shows confirmation dialog and
                     await _onBackAttempted(context, controller);
                   },
                   icon: const Icon(
@@ -582,7 +634,9 @@ class _ControlScreenState extends State<ControlScreen>
                   final sectionSpacing = isCompactHeight ? 8.0 : 12.0;
                   final isCompact = isCompactWidth || isCompactHeight;
 
-                  return Padding(
+                  // Build the main control UI as a named variable so we
+                  // can overlay the sleep screen on top without re-indenting.
+                  final body = Padding(
                     padding: EdgeInsets.fromLTRB(
                       outerPadding,
                       sectionSpacing,
@@ -634,6 +688,18 @@ class _ControlScreenState extends State<ControlScreen>
                         _buildStatusBar(controller, isCompact: isCompact),
                       ],
                     ),
+                  );
+
+                  // Overlay the sleep screen on top when active.
+                  // Using a Stack in the build tree (not OverlayEntry) so that
+                  // setState() drives visibility directly — no Overlay API needed.
+                  if (!_sleepMode) return body;
+                  return Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      body,
+                      _SleepModeOverlay(onWake: _exitSleepMode),
+                    ],
                   );
                 },
               ),
@@ -1751,6 +1817,144 @@ class _RSSIBadge extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// Sleep Mode Overlay — Industrial Inactivity Screen
+//
+// Shown after [_inactivityTimeout] of no interaction while E-stop is active.
+// Covers the entire control UI and blocks all input.
+// Tap anywhere to return to the E-stop active state.
+// Motion remains locked until the operator completes the swipe-to-reset flow.
+// ═══════════════════════════════════════════════════════════
+
+class _SleepModeOverlay extends StatefulWidget {
+  const _SleepModeOverlay({ required this.onWake});
+
+  final VoidCallback onWake;
+
+  @override
+  State<_SleepModeOverlay> createState() => _SleepModeOverlayState();
+}
+
+class _SleepModeOverlayState extends State<_SleepModeOverlay>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulseAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _pulseAnim.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque, // Consume all touches — block control UI.
+      onTap: widget.onWake,
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          color: const Color(0xEE000000), // ~93 % opaque dark background.
+          child: Center(
+            child: AnimatedBuilder(
+              animation: _pulseAnim,
+              builder: (context, _) {
+                final pulse =
+                    Curves.easeInOut.transform(_pulseAnim.value);
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // ── Sleep icon ───────────────────────────────────────────
+                    Container(
+                      width: 76,
+                      height: 76,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.white.withAlpha(
+                          (8 + (18 * pulse)).round(),
+                        ),
+                        border: Border.all(
+                          color: Colors.white.withAlpha(
+                            (50 + (55 * pulse)).round(),
+                          ),
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Icon(
+                        Icons.bedtime_rounded,
+                        size: 36,
+                        color: Colors.white.withAlpha(
+                          (148 + (80 * pulse)).round(),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    // ── Title ───────────────────────────────────────────────
+                    const Text(
+                      'SYSTEM IDLE',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 3.0,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    // ── E-stop badge ────────────────────────────────────────
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.eStopColor.withAlpha(30),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: AppColors.eStopColor.withAlpha(90),
+                        ),
+                      ),
+                      child: const Text(
+                        'EMERGENCY STOP ACTIVE — ALL OUTPUTS OFF',
+                        style: TextStyle(
+                          color: AppColors.eStopColorLight,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 40),
+                    // ── Wake instruction ─────────────────────────────────────
+                    Text(
+                      'TAP ANYWHERE TO RESUME',
+                      style: TextStyle(
+                        color: Colors.white.withAlpha(
+                          (75 + (105 * pulse)).round(),
+                        ),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 1.8,
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
       ),
     );
   }
