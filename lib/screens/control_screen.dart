@@ -311,10 +311,6 @@ class _ControlScreenState extends State<ControlScreen>
     await _craneController?.setDeadmanHeld(held);
   }
 
-  void _onDeadmanLockToggle() {
-    _craneController?.toggleDeadmanLock();
-  }
-
   // ═══════════════════════════════════════════════════════════
   // Hardware-Assisted Safety: Lifecycle & Volume-Key E-Stop
   // ═══════════════════════════════════════════════════════════
@@ -613,10 +609,8 @@ class _ControlScreenState extends State<ControlScreen>
                               const SizedBox(width: 8),
                               _DeadmanControlButton(
                                 isHeld: controller.deadmanHeld,
-                                isLocked: controller.deadmanLocked,
                                 isEstopActive: controller.estopLatched,
                                 onHeld: _onDeadmanHeld,
-                                onLockToggle: _onDeadmanLockToggle,
                                 compact: isCompact,
                               ),
                             ],
@@ -770,31 +764,31 @@ class _ControlScreenState extends State<ControlScreen>
         children: [
           _eStopLedIndicator(
             emergencyActive: controller.estopLatched || controller.ledEstop,
-            pinName: 'R0_0',
+            // pinName: 'R0_0',
           ),
           _ledIndicator(
             label: 'UP',
             active: controller.ledUp || controller.upHoldActive,
             color: AppColors.upColor,
-            pinName: 'Q0.1',
+            // pinName: 'Q0.1',
           ),
           _ledIndicator(
             label: 'DOWN',
             active: controller.ledDown || controller.downHoldActive,
             color: AppColors.downColor,
-            pinName: 'Q0.2',
+            // pinName: 'Q0.2',
           ),
           _ledIndicator(
             label: 'LEFT',
             active: controller.ledLeft || controller.leftHoldActive,
             color: AppColors.leftColor,
-            pinName: 'Q0.3',
+            // pinName: 'Q0.3',
           ),
           _ledIndicator(
             label: 'RIGHT',
             active: controller.ledRight || controller.rightHoldActive,
             color: AppColors.rightColor,
-            pinName: 'Q0.4',
+            // pinName: 'Q0.4',
           ),
           // Container(
           //   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -819,7 +813,7 @@ class _ControlScreenState extends State<ControlScreen>
 
   Widget _eStopLedIndicator({
     required bool emergencyActive,
-    required String pinName,
+    // required String pinName,
   }) {
     return AnimatedBuilder(
       animation: _pulseController,
@@ -852,15 +846,15 @@ class _ControlScreenState extends State<ControlScreen>
                 ],
               ),
             ),
-            const SizedBox(height: 4),
-            Text(
-              pinName,
-              style: const TextStyle(
-                fontSize: 8,
-                fontWeight: FontWeight.bold,
-                color: ConnectionColors.textSecondary,
-              ),
-            ),
+            const SizedBox(height: 8),
+            // Text(
+            //   pinName,
+            //   style: const TextStyle(
+            //     fontSize: 8,
+            //     fontWeight: FontWeight.bold,
+            //     color: ConnectionColors.textSecondary,
+            //   ),
+            // ),
             Text(
               'ESTOP',
               style: TextStyle(
@@ -881,7 +875,7 @@ class _ControlScreenState extends State<ControlScreen>
     required String label,
     required Color color,
     required bool active,
-    required String pinName,
+    // required String pinName,
     Color? inactiveColor,
   }) {
     final targetColor = active
@@ -916,15 +910,15 @@ class _ControlScreenState extends State<ControlScreen>
             );
           },
         ),
-        const SizedBox(height: 4),
-        Text(
-          pinName,
-          style: const TextStyle(
-            fontSize: 8,
-            fontWeight: FontWeight.bold,
-            color: ConnectionColors.textSecondary,
-          ),
-        ),
+        const SizedBox(height: 8),
+        // Text(
+        //   pinName,
+        //   style: const TextStyle(
+        //     fontSize: 8,
+        //     fontWeight: FontWeight.bold,
+        //     color: ConnectionColors.textSecondary,
+        //   ),
+        // ),
         Text(
           label,
           style: TextStyle(
@@ -1437,27 +1431,23 @@ class _DeadmanButtonState extends State<_DeadmanButton>
 }
 
 // ═══════════════════════════════════════════════════════════
-// Deadman Control Button — Operator-Presence Safety Lock
+// Deadman Control Button — Hold-to-Run Operator Presence
 //
-// Hold to enable motion. Release to kill all motion.
-// Hold 4 seconds to toggle LOCK mode (motion persists without holding).
+// Hold to enable motion. Release to immediately kill all motion.
+// No lock mode — continuous operator presence required at all times.
 // ═══════════════════════════════════════════════════════════
 
 class _DeadmanControlButton extends StatefulWidget {
   const _DeadmanControlButton({
     required this.isHeld,
-    required this.isLocked,
     required this.isEstopActive,
     required this.onHeld,
-    required this.onLockToggle,
     required this.compact,
   });
 
   final bool isHeld;
-  final bool isLocked;
   final bool isEstopActive;
   final Future<void> Function(bool held) onHeld;
-  final VoidCallback onLockToggle;
   final bool compact;
 
   @override
@@ -1466,13 +1456,9 @@ class _DeadmanControlButton extends StatefulWidget {
 
 class _DeadmanControlButtonState extends State<_DeadmanControlButton>
     with TickerProviderStateMixin {
-  static const Duration _lockHoldDuration = Duration(seconds: 2);
   static const Color _heldColor = Color(0xFFD97706); // amber-600
-  static const Color _lockedColor = Color(0xFF16A34A); // green-600
 
   late final AnimationController _glowAnim;
-  late final AnimationController _progressAnim;
-  Timer? _lockTimer;
   bool _pointerDown = false;
 
   @override
@@ -1482,17 +1468,11 @@ class _DeadmanControlButtonState extends State<_DeadmanControlButton>
       vsync: this,
       duration: const Duration(milliseconds: 1400),
     )..repeat(reverse: true);
-    _progressAnim = AnimationController(
-      vsync: this,
-      duration: _lockHoldDuration,
-    );
   }
 
   @override
   void dispose() {
     _glowAnim.dispose();
-    _progressAnim.dispose();
-    _lockTimer?.cancel();
     super.dispose();
   }
 
@@ -1502,9 +1482,6 @@ class _DeadmanControlButtonState extends State<_DeadmanControlButton>
     // When E-stop activates mid-press, abort the interaction cleanly.
     if (widget.isEstopActive && !oldWidget.isEstopActive && _pointerDown) {
       _pointerDown = false;
-      _lockTimer?.cancel();
-      _lockTimer = null;
-      _progressAnim.reset();
       // onHeld(false) is intentionally skipped — triggerEStop() already cleared
       // deadman state in the controller; calling it would be a no-op anyway.
     }
@@ -1514,44 +1491,31 @@ class _DeadmanControlButtonState extends State<_DeadmanControlButton>
     if (widget.isEstopActive) return; // E-stop blocks all deadman input.
     _pointerDown = true;
     widget.onHeld(true);
-    _progressAnim.forward(from: 0.0);
-    _lockTimer = Timer(_lockHoldDuration, () {
-      if (!_pointerDown) return;
-      widget.onLockToggle();
-      HapticFeedback.heavyImpact();
-      Vibration.vibrate(duration: 200, amplitude: 200);
-      _progressAnim.reset();
-    });
   }
 
   void _onPointerUp() {
     if (!_pointerDown) return;
     _pointerDown = false;
-    _lockTimer?.cancel();
-    _lockTimer = null;
-    _progressAnim.reset();
     widget.onHeld(false);
   }
 
   @override
   Widget build(BuildContext context) {
     final isDisabled = widget.isEstopActive;
-    final isActive = !isDisabled && (widget.isHeld || widget.isLocked);
-    final isLocked = !isDisabled && widget.isLocked;
+    final isActive = !isDisabled && widget.isHeld;
     final compact = widget.compact;
-    final Color activeColor = isLocked ? _lockedColor : _heldColor;
+    const Color activeColor = _heldColor;
 
     return Listener(
       onPointerDown: (_) => _onPointerDown(),
       onPointerUp: (_) => _onPointerUp(),
       onPointerCancel: (_) => _onPointerUp(),
       child: AnimatedBuilder(
-        animation: Listenable.merge([_glowAnim, _progressAnim]),
+        animation: _glowAnim,
         builder: (context, _) {
           final glow = isActive
               ? Curves.easeInOut.transform(_glowAnim.value)
               : 0.0;
-          final progress = _progressAnim.value;
 
           return AnimatedContainer(
             duration: const Duration(milliseconds: 200),
@@ -1616,8 +1580,6 @@ class _DeadmanControlButtonState extends State<_DeadmanControlButton>
                   child: Icon(
                     isDisabled
                         ? Icons.block_rounded
-                        : isLocked
-                        ? Icons.lock_rounded
                         : (widget.isHeld
                               ? Icons.pan_tool_rounded
                               : Icons.pan_tool_outlined),
@@ -1659,35 +1621,7 @@ class _DeadmanControlButtonState extends State<_DeadmanControlButton>
                     letterSpacing: 0.4,
                   ),
                   child: Text(
-                    isDisabled
-                        ? 'E-STOP'
-                        : isLocked
-                        ? 'LOCKED'
-                        : (widget.isHeld ? 'ACTIVE' : 'HOLD'),
-                  ),
-                ),
-                // Long-press progress bar (reserved space always)
-                SizedBox(height: compact ? 5 : 6),
-                SizedBox(
-                  height: 3,
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: compact ? 8.0 : 10.0,
-                    ),
-                    child: progress > 0 && !isDisabled
-                        ? ClipRRect(
-                            borderRadius: BorderRadius.circular(2),
-                            child: LinearProgressIndicator(
-                              value: progress,
-                              backgroundColor: ConnectionColors.border
-                                  .withAlpha(80),
-                              valueColor: const AlwaysStoppedAnimation<Color>(
-                                _lockedColor,
-                              ),
-                              minHeight: 3,
-                            ),
-                          )
-                        : const SizedBox.shrink(),
+                    isDisabled ? 'E-STOP' : (widget.isHeld ? 'ACTIVE' : 'HOLD'),
                   ),
                 ),
               ],

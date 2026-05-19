@@ -55,7 +55,6 @@ class CraneController extends ChangeNotifier {
   HoistDirection? _verticalDirectionLock;
   HoistDirection? _horizontalDirectionLock;
   bool _deadmanHeld = false;
-  bool _deadmanLocked = false;
   // bool _conflictActive = false;
   // bool _upActive = false;
   // bool _downActive = false;
@@ -86,8 +85,7 @@ class CraneController extends ChangeNotifier {
       _activeDirectionalHolds.contains(HoistDirection.left);
   bool get rightHoldActive =>
       _activeDirectionalHolds.contains(HoistDirection.right);
-  bool get deadmanActive => _deadmanHeld || _deadmanLocked;
-  bool get deadmanLocked => _deadmanLocked;
+  bool get deadmanActive => _deadmanHeld;
   bool get deadmanHeld => _deadmanHeld;
   String? get sessionEmail => _sessionEmail;
   String? get errorMessage => _errorMessage ?? _transportConnState.message;
@@ -361,7 +359,6 @@ class CraneController extends ChangeNotifier {
         _activeCommand = PlcOutputCommand.idle();
         _estopLatched = false;
         _deadmanHeld = false;
-        _deadmanLocked = false;
         _startupEmergencyArmedForConnection = false;
         _sessionEmail = null;
       } else if (snapshot.status == BleConnectionStatus.authenticated &&
@@ -554,7 +551,6 @@ class CraneController extends ChangeNotifier {
   Future<void> triggerEStop() async {
     _estopLatched = true;
     _deadmanHeld = false;
-    _deadmanLocked = false;
     _clearDirectionalHolds(notify: false);
     final cmd = PlcOutputCommand.emergencyStop();
     _activeCommand = cmd;
@@ -580,7 +576,6 @@ class CraneController extends ChangeNotifier {
     // Latch state synchronously so the UI reflects the emergency immediately.
     _estopLatched = true;
     _deadmanHeld = false;
-    _deadmanLocked = false;
     _clearDirectionalHolds(notify: false);
     _activeCommand = PlcOutputCommand.emergencyStop();
     // Discard any queued motion command so it cannot race the safe-state write.
@@ -605,16 +600,6 @@ class CraneController extends ChangeNotifier {
     notifyListeners();
     if (!deadmanActive) {
       await releaseAllDirectionalHolds();
-    }
-  }
-
-  void toggleDeadmanLock() {
-    // E-stop always overrides deadman — block while emergency is active.
-    if (_estopLatched) return;
-    _deadmanLocked = !_deadmanLocked;
-    notifyListeners();
-    if (!deadmanActive) {
-      unawaited(releaseAllDirectionalHolds());
     }
   }
 
