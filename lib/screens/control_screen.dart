@@ -40,6 +40,12 @@ class _ControlScreenState extends State<ControlScreen>
   CraneController? _craneController;
   bool _wasDisconnected = false;
 
+  // ── Hardware-button E-stop debounce ────────────────────────────────────────
+  // Tracks the last time a hardware volume key triggered an E-stop so that
+  // rapid accidental presses within the cooldown window are ignored.
+  DateTime? _lastHardwareEStopTime;
+  static const Duration _hardwareEStopCooldown = Duration(milliseconds: 1500);
+
   @override
   void initState() {
     super.initState();
@@ -55,6 +61,14 @@ class _ControlScreenState extends State<ControlScreen>
 
     // Keep the screen alive so the display never times out mid-operation.
     WakelockPlus.enable();
+
+    // ── Hardware volume-key E-stop ────────────────────────────────────────
+    // Intercepts physical Volume Up and Volume Down presses while this screen
+    // is active.  Returning true from the handler consumes the event, which
+    // prevents the system volume-change overlay from appearing.
+    // Works only while the app holds the foreground Activity — this is the
+    // correct and expected scope for a hardware safety trigger.
+    HardwareKeyboard.instance.addHandler(_handleHardwareKey);
     // ─────────────────────────────────────────────────────────────────────
 
     _pulseController = AnimationController(
@@ -75,6 +89,7 @@ class _ControlScreenState extends State<ControlScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    HardwareKeyboard.instance.removeHandler(_handleHardwareKey);
     // Restore normal system UI and release the wakelock when leaving.
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     WakelockPlus.disable();
@@ -83,16 +98,32 @@ class _ControlScreenState extends State<ControlScreen>
     super.dispose();
   }
 
-  /// Re-enter immersive mode whenever the app returns to the foreground.
-  /// Handles the case where the operator briefly switched to another app
-  /// (e.g., via the Recent Apps panel) and came back.
+  /// Lifecycle observer — enforces safe state on every foreground loss.
+  ///
+  /// | Lifecycle event          | Android trigger                          |
+  /// |--------------------------|------------------------------------------|
+  /// | paused                   | screen off, lock, home, task-switch, kill|
+  /// | detached                 | engine destruction / forced termination  |
+  /// | resumed                  | app returns to foreground                |
+  ///
+  /// The power button cannot be intercepted by normal third-party apps;
+  /// screen-off is detected reliably here via [AppLifecycleState.paused].
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     if (!mounted) return;
-    if (state == AppLifecycleState.resumed) {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-      WakelockPlus.enable();
+    switch (state) {
+      case AppLifecycleState.resumed:
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+        WakelockPlus.enable();
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+        // App has fully left the foreground or the engine is being torn down.
+        // Terminate the BLE control session immediately so the PLC returns to
+        // a safe state without waiting for a BLE connection-timeout watchdog.
+        _triggerLifecycleSafeDisconnect();
+      default:
+        break;
     }
   }
 
@@ -282,6 +313,63 @@ class _ControlScreenState extends State<ControlScreen>
 
   void _onDeadmanLockToggle() {
     _craneController?.toggleDeadmanLock();
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // Hardware-Assisted Safety: Lifecycle & Volume-Key E-Stop
+  // ═══════════════════════════════════════════════════════════
+
+  /// Called by the lifecycle observer when the app leaves the foreground.
+  /// Triggers a safe disconnect: latches E-stop, sends emergency packet,
+  /// then tears down the BLE session — all before the process may be killed.
+  void _triggerLifecycleSafeDisconnect() {
+    final controller = _craneController;
+    if (controller == null || !controller.isConnected) return;
+    unawaited(controller.triggerSafeDisconnect());
+  }
+
+  /// Hardware-keyboard event handler registered on [HardwareKeyboard].
+  ///
+  /// Intercepts Volume Up and Volume Down key-down events while this screen
+  /// is active.  Returns `true` to consume the event, which prevents the
+  /// Android system from processing the volume change.
+  ///
+  /// Android limitation: this works only while the Flutter Activity holds
+  /// focus.  Volume keys pressed when the screen is off or another app is in
+  /// the foreground are NOT delivered here — the lifecycle safe-disconnect
+  /// path above handles those scenarios.
+  bool _handleHardwareKey(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.audioVolumeUp ||
+        key == LogicalKeyboardKey.audioVolumeDown) {
+      _onHardwareEStop();
+      return true; // Consume — suppress system volume-change overlay.
+    }
+    return false;
+  }
+
+  /// Triggers E-stop from a physical hardware button with debounce protection.
+  ///
+  /// A 1.5 s cooldown prevents rapid accidental re-triggers while ensuring
+  /// the first intentional press activates the stop with zero perceptible delay.
+  void _onHardwareEStop() {
+    if (!mounted) return;
+    final controller = _craneController;
+    if (controller == null || !controller.isConnected) return;
+    if (controller.estopLatched) return; // Already in emergency state.
+
+    final now = DateTime.now();
+    if (_lastHardwareEStopTime != null &&
+        now.difference(_lastHardwareEStopTime!) < _hardwareEStopCooldown) {
+      return; // Within cooldown window — ignore.
+    }
+    _lastHardwareEStopTime = now;
+
+    unawaited(controller.releaseAllDirectionalHolds());
+    unawaited(controller.triggerEStop());
+    HapticFeedback.heavyImpact();
+    Vibration.vibrate(duration: 600, amplitude: 255);
   }
 
   // ═══════════════════════════════════════════════════════════

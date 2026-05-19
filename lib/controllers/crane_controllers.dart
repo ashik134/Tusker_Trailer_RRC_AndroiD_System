@@ -572,6 +572,25 @@ class CraneController extends ChangeNotifier {
     // ensuring the E-stop is the very next thing written.
   }
 
+  /// Immediately latches E-stop and terminates the BLE session.
+  /// Called when the device leaves foreground or a hardware safety button fires.
+  /// The caller does not need to await — fire-and-forget is safe here.
+  Future<void> triggerSafeDisconnect() async {
+    if (!isConnected) return;
+    // Latch state synchronously so the UI reflects the emergency immediately.
+    _estopLatched = true;
+    _deadmanHeld = false;
+    _deadmanLocked = false;
+    _clearDirectionalHolds(notify: false);
+    _activeCommand = PlcOutputCommand.emergencyStop();
+    // Discard any queued motion command so it cannot race the safe-state write.
+    _pendingCommandBytes = null;
+    notifyListeners();
+    // BleService.disconnect() writes emergencyStop wireBytes before tearing
+    // down the BLE link, giving the PLC one last chance to enter safe state.
+    await _bleService.disconnect();
+  }
+
   Future<void> resetEStop() async {
     _estopLatched = false;
     _clearDirectionalHolds(notify: false);
