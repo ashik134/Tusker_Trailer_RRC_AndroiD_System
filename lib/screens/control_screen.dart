@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'dart:async';
 import 'package:provider/provider.dart';
 import 'package:vibration/vibration.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'package:tusker_trailer_rrc/utils/constants.dart';
 import 'package:tusker_trailer_rrc/controllers/crane_controllers.dart';
@@ -34,7 +35,7 @@ class ControlScreen extends StatefulWidget {
 }
 
 class _ControlScreenState extends State<ControlScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final AnimationController _pulseController;
   CraneController? _craneController;
   bool _wasDisconnected = false;
@@ -42,6 +43,20 @@ class _ControlScreenState extends State<ControlScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+
+    // ── Operational lock-down ─────────────────────────────────────────────
+    // Enter sticky immersive mode: hides the system navigation bar and
+    // status bar. Android will show the nav bar temporarily on the first
+    // swipe from the bottom edge, but it auto-hides again — meaning one
+    // accidental swipe no longer immediately triggers Home/Recents.
+    // This is the strongest gesture guard available to non-device-owner apps.
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+
+    // Keep the screen alive so the display never times out mid-operation.
+    WakelockPlus.enable();
+    // ─────────────────────────────────────────────────────────────────────
+
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
@@ -59,9 +74,26 @@ class _ControlScreenState extends State<ControlScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    // Restore normal system UI and release the wakelock when leaving.
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    WakelockPlus.disable();
     _pulseController.dispose();
     _craneController?.removeListener(_onControllerChange);
     super.dispose();
+  }
+
+  /// Re-enter immersive mode whenever the app returns to the foreground.
+  /// Handles the case where the operator briefly switched to another app
+  /// (e.g., via the Recent Apps panel) and came back.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (!mounted) return;
+    if (state == AppLifecycleState.resumed) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      WakelockPlus.enable();
+    }
   }
 
   void _onControllerChange() {
@@ -253,17 +285,121 @@ class _ControlScreenState extends State<ControlScreen>
   }
 
   // ═══════════════════════════════════════════════════════════
+  // Back Navigation Guard
+  // ═══════════════════════════════════════════════════════════
+
+  /// Called when Android back gesture / system back is intercepted on the
+  /// Control Screen.  Immediately releases any active motion holds (safety
+  /// first), then asks the operator to confirm before disconnecting.
+  Future<void> _onBackAttempted(
+    BuildContext context,
+    CraneController controller,
+  ) async {
+    // Safety: stop all crane motion the instant back navigation is detected.
+    await controller.releaseAllDirectionalHolds();
+
+    if (!mounted) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: const Row(
+          children: [
+            Icon(
+              Icons.warning_amber_rounded,
+              color: ConnectionColors.warning,
+              size: 22,
+            ),
+            SizedBox(width: 8),
+            Text(
+              'Exit Control Screen?',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+        content: const Text(
+          'Leaving the control screen will disconnect from the crane '
+          'controller.\n\nEnsure the crane is in a safe, stopped position '
+          'before exiting.',
+          style: TextStyle(
+            color: ConnectionColors.textSecondary,
+            fontSize: 13.5,
+            height: 1.5,
+          ),
+        ),
+        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+        actions: [
+          OutlinedButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(false),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: ConnectionColors.primary,
+              side: const BorderSide(color: ConnectionColors.primary),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 20,
+                vertical: 12,
+              ),
+            ),
+            child: const Text(
+              'STAY',
+              style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 0.6),
+            ),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: ConnectionColors.error,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 12,
+              ),
+            ),
+            child: const Text(
+              'DISCONNECT & EXIT',
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      await controller.disconnect();
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
   // Build
   // ═══════════════════════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
     return Consumer<CraneController>(
       builder: (ctx, controller, _) {
-        return Scaffold(
-          backgroundColor: ConnectionColors.background,
-          resizeToAvoidBottomInset: false,
-          // For compact screens, use this layout:
-          appBar: AppBar(
+        return PopScope(
+          // Block all Android back gestures and system back actions while on
+          // the Control Screen. Navigation away requires explicit confirmation.
+          canPop: false,
+          onPopInvokedWithResult: (bool didPop, Object? result) {
+            if (didPop) return;
+            unawaited(_onBackAttempted(ctx, controller));
+          },
+          child: Scaffold(
+            backgroundColor: ConnectionColors.background,
+            resizeToAvoidBottomInset: false,
+            // For compact screens, use this layout:
+            appBar: AppBar(
             backgroundColor: ConnectionColors.surface,
             elevation: 0,
             automaticallyImplyLeading: false,
@@ -464,7 +600,8 @@ class _ControlScreenState extends State<ControlScreen>
               },
             ),
           ),
-        );
+        ),      // end Scaffold
+      );        // end PopScope
       },
     );
   }
