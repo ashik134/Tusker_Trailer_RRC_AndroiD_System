@@ -376,45 +376,44 @@ class _ControlScreenState extends State<ControlScreen>
   // Back Navigation Guard
   // ═══════════════════════════════════════════════════════════
 
-  /// Called when Android back gesture / system back 
+  /// Called when Android back gesture / system back
   Future<void> _onBackAttempted(
-  BuildContext context,
-  CraneController controller,
-) async {
-  // Safety: stop all crane motion immediately
-  await controller.releaseAllDirectionalHolds();
+    BuildContext context,
+    CraneController controller,
+  ) async {
+    // Safety: stop all crane motion immediately
+    await controller.releaseAllDirectionalHolds();
 
-  if (!mounted) return;
+    if (!mounted) return;
 
-  // Delegate dialog to a method that takes NO BuildContext from outer scope
-  final confirmed = await _showExitConfirmationDialog();
+    // Delegate dialog to a method that takes NO BuildContext from outer scope
+    final confirmed = await _showExitConfirmationDialog();
 
-  if (!mounted) return;
+    if (!mounted) return;
 
-  if (confirmed == true) {
-    await controller.disconnect();
+    if (confirmed == true) {
+      await controller.disconnect();
+    }
   }
-}
 
-/// Shows exit confirmation dialog.
-/// This method is safe because it only uses the context
-/// provided directly to [showDialog].
-Future<bool?> _showExitConfirmationDialog() {
-  // Use widget's context directly — only valid when called synchronously
-  // from a mounted widget
-  assert(mounted, 'Cannot show dialog when widget is not mounted');
+  /// Shows exit confirmation dialog.
+  /// This method is safe because it only uses the context
+  /// provided directly to [showDialog].
+  Future<bool?> _showExitConfirmationDialog() {
+    // Use widget's context directly — only valid when called synchronously
+    // from a mounted widget
+    assert(mounted, 'Cannot show dialog when widget is not mounted');
 
-  return showDialog<bool>(
-    context: context,
-    barrierDismissible: false,
-    builder: (dialogCtx) => _ExitConfirmationDialog(),
-  );
-}
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) => _ExitConfirmationDialog(),
+    );
+  }
 
-// ═══════════════════════════════════════════════════════════
-// Exit Confirmation Dialog (Stateless — no BuildContext stored)
-// ═══════════════════════════════════════════════════════════
-
+  // ═══════════════════════════════════════════════════════════
+  // Exit Confirmation Dialog (Stateless — no BuildContext stored)
+  // ═══════════════════════════════════════════════════════════
 
   // ═══════════════════════════════════════════════════════════
   // Build
@@ -436,208 +435,217 @@ Future<bool?> _showExitConfirmationDialog() {
             resizeToAvoidBottomInset: false,
             // For compact screens, use this layout:
             appBar: AppBar(
-            backgroundColor: ConnectionColors.surface,
-            elevation: 0,
-            automaticallyImplyLeading: false,
-            titleSpacing: 0,
+              backgroundColor: ConnectionColors.surface,
+              elevation: 0,
+              automaticallyImplyLeading: false,
+              titleSpacing: 0,
 
-            // ── Leading: Device Icon ──────────────────────────
-            leading: Container(
-              margin: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: ConnectionColors.primarySoft,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(
-                Icons.developer_board_rounded,
-                color: ConnectionColors.primary,
-                size: 22,
-              ),
-            ),
-
-            // ── Title: Device Info ────────────────────────────
-            title: Row(
-              children: [
-                // Device name & status
-                Expanded(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Device name
-                      Text(
-                        controller.connectedDeviceName ??
-                            BLEConstants.deviceName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          color: ConnectionColors.textPrimary,
-                          letterSpacing: -0.2,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      // Status row with animated dot
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _StatusDot(isConnected: controller.isConnected),
-                          const SizedBox(width: 6),
-                          Text(
-                            controller.isConnected
-                                ? 'Connected'
-                                : 'Disconnected',
-                            style: TextStyle(
-                              color: controller.isConnected
-                                  ? ConnectionColors.connected
-                                  : ConnectionColors.error,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          if (controller.isConnected) ...[
-                            const SizedBox(width: 8),
-                            // RSSI badge (if available)
-                            _RSSIBadge(rssi: controller.connectedDeviceRssi),
-                          ],
-                        ],
-                      ),
-                    ],
-                  ),
+              // ── Leading: Device Icon ──────────────────────────
+              leading: Container(
+                margin: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: ConnectionColors.primarySoft,
+                  borderRadius: BorderRadius.circular(12),
                 ),
-              ],
-            ),
+                child: const Icon(
+                  Icons.developer_board_rounded,
+                  color: ConnectionColors.primary,
+                  size: 22,
+                ),
+              ),
 
-            // ── Actions ───────────────────────────────────────
-            actions: [
-              // Connection info tooltip
-              if (controller.isConnected)
-                Tooltip(
-                  message:
-                      'Device: ${controller.connectedDeviceName}\n'
-                      'RSSI: ${controller.connectedDeviceRssi ?? "N/A"} dBm\n'
-                      'Status: Authenticated',
-                  child: Container(
-                    margin: const EdgeInsets.only(right: 4),
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: ConnectionColors.connectedBg,
+              // ── Title: Device Info ────────────────────────────
+              title: Row(
+                children: [
+                  // Device name & status
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Device name
+                        Text(
+                          controller.connectedDeviceName ??
+                              BLEConstants.deviceName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: ConnectionColors.textPrimary,
+                            letterSpacing: -0.2,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        // Status row with animated dot
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _StatusDot(isConnected: controller.isConnected),
+                            const SizedBox(width: 6),
+                            Text(
+                              controller.isConnected
+                                  ? 'Connected'
+                                  : 'Disconnected',
+                              style: TextStyle(
+                                color: controller.isConnected
+                                    ? ConnectionColors.connected
+                                    : ConnectionColors.error,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            if (controller.isConnected) ...[
+                              const SizedBox(width: 8),
+                              // RSSI badge (if available)
+                              _RSSIBadge(rssi: controller.connectedDeviceRssi),
+                            ],
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+
+              // ── Actions ───────────────────────────────────────
+              actions: [
+                // Connection info tooltip
+                if (controller.isConnected)
+                  Tooltip(
+                    message:
+                        'Device: ${controller.connectedDeviceName}\n'
+                        'RSSI: ${controller.connectedDeviceRssi ?? "N/A"} dBm\n'
+                        'Status: Authenticated',
+                    child: Container(
+                      margin: const EdgeInsets.only(right: 4),
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: ConnectionColors.connectedBg,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(
+                        Icons.info_outline_rounded,
+                        color: ConnectionColors.connected,
+                        size: 18,
+                      ),
+                    ),
+                  ),
+
+                // Sign out button
+                TextButton.icon(
+                  onPressed: () async {
+                    // Step 1: Release all holds (safe, no context used after)
+                    await controller.releaseAllDirectionalHolds();
+
+                    // Step 2: Guard — check if still mounted before using context
+                    if (!context.mounted) return;
+
+                    // Step 3: Now safe to call _onBackAttempted with context
+                    await _onBackAttempted(context, controller);
+                  },
+                  icon: const Icon(
+                    Icons.logout_rounded,
+                    size: 16,
+                    color: ConnectionColors.textSecondary,
+                  ),
+                  label: const Text(
+                    'SIGN OUT',
+                    style: TextStyle(
+                      color: ConnectionColors.textSecondary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(
-                      Icons.info_outline_rounded,
-                      color: ConnectionColors.connected,
-                      size: 18,
-                    ),
                   ),
                 ),
+                const SizedBox(width: 4),
+              ],
 
-              // Sign out button
-              TextButton.icon(
-                onPressed: () async {
-                  await controller.releaseAllDirectionalHolds();
-                  controller.disconnect();
-                },
-                icon: const Icon(
-                  Icons.logout_rounded,
-                  size: 16,
-                  color: ConnectionColors.textSecondary,
-                ),
-                label: const Text(
-                  'SIGN OUT',
-                  style: TextStyle(
-                    color: ConnectionColors.textSecondary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.8,
-                  ),
-                ),
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
+              // ── Bottom Divider ─────────────────────────────────
+              bottom: PreferredSize(
+                preferredSize: const Size.fromHeight(1),
+                child: Container(height: 1, color: ConnectionColors.divider),
               ),
-              const SizedBox(width: 4),
-            ],
-
-            // ── Bottom Divider ─────────────────────────────────
-            bottom: PreferredSize(
-              preferredSize: const Size.fromHeight(1),
-              child: Container(height: 1, color: ConnectionColors.divider),
             ),
-          ),
-          body: SafeArea(
-            maintainBottomViewPadding: true,
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final width = constraints.maxWidth;
-                final height = constraints.maxHeight;
-                final isCompactWidth = width < 390;
-                final isCompactHeight = height < 720;
-                final outerPadding = isCompactWidth ? 10.0 : 12.0;
-                final sectionSpacing = isCompactHeight ? 8.0 : 12.0;
-                final isCompact = isCompactWidth || isCompactHeight;
+            body: SafeArea(
+              maintainBottomViewPadding: true,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final width = constraints.maxWidth;
+                  final height = constraints.maxHeight;
+                  final isCompactWidth = width < 390;
+                  final isCompactHeight = height < 720;
+                  final outerPadding = isCompactWidth ? 10.0 : 12.0;
+                  final sectionSpacing = isCompactHeight ? 8.0 : 12.0;
+                  final isCompact = isCompactWidth || isCompactHeight;
 
-                return Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    outerPadding,
-                    sectionSpacing,
-                    outerPadding,
-                    sectionSpacing,
-                  ),
-                  child: Column(
-                    children: [
-                      _buildSafetyActionPanel(
-                        controller: controller,
-                        compact: isCompact,
-                      ),
-                      SizedBox(height: sectionSpacing),
-                      IntrinsicHeight(
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Expanded(
-                              child: _liveLEDs(controller, compact: isCompact),
-                            ),
-                            const SizedBox(width: 8),
-                            _DeadmanControlButton(
-                              isHeld: controller.deadmanHeld,
-                              isLocked: controller.deadmanLocked,
-                              isEstopActive: controller.estopLatched,
-                              onHeld: _onDeadmanHeld,
-                              onLockToggle: _onDeadmanLockToggle,
-                              compact: isCompact,
-                            ),
-                          ],
+                  return Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      outerPadding,
+                      sectionSpacing,
+                      outerPadding,
+                      sectionSpacing,
+                    ),
+                    child: Column(
+                      children: [
+                        _buildSafetyActionPanel(
+                          controller: controller,
+                          compact: isCompact,
                         ),
-                      ),
-                      SizedBox(height: sectionSpacing),
-                      Expanded(
-                        child: _buildButtonGrid(
-                          isCompact: isCompact,
-                          isDisabled:
-                              controller.estopLatched ||
-                              !controller.isConnected ||
-                              !controller.deadmanActive,
-                          upPressed: controller.upHoldActive,
-                          downPressed: controller.downHoldActive,
-                          leftPressed: controller.leftHoldActive,
-                          rightPressed: controller.rightHoldActive,
+                        SizedBox(height: sectionSpacing),
+                        IntrinsicHeight(
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Expanded(
+                                child: _liveLEDs(
+                                  controller,
+                                  compact: isCompact,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              _DeadmanControlButton(
+                                isHeld: controller.deadmanHeld,
+                                isLocked: controller.deadmanLocked,
+                                isEstopActive: controller.estopLatched,
+                                onHeld: _onDeadmanHeld,
+                                onLockToggle: _onDeadmanLockToggle,
+                                compact: isCompact,
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                      SizedBox(height: sectionSpacing),
-                      _buildStatusBar(controller, isCompact: isCompact),
-                    ],
-                  ),
-                );
-              },
+                        SizedBox(height: sectionSpacing),
+                        Expanded(
+                          child: _buildButtonGrid(
+                            isCompact: isCompact,
+                            isDisabled:
+                                controller.estopLatched ||
+                                !controller.isConnected ||
+                                !controller.deadmanActive,
+                            upPressed: controller.upHoldActive,
+                            downPressed: controller.downHoldActive,
+                            leftPressed: controller.leftHoldActive,
+                            rightPressed: controller.rightHoldActive,
+                          ),
+                        ),
+                        SizedBox(height: sectionSpacing),
+                        _buildStatusBar(controller, isCompact: isCompact),
+                      ],
+                    ),
+                  );
+                },
+              ),
             ),
-          ),
-        ),      // end Scaffold
-      );        // end PopScope
+          ), // end Scaffold
+        ); // end PopScope
       },
     );
   }
@@ -1020,7 +1028,7 @@ Future<bool?> _showExitConfirmationDialog() {
       onTap: _onEStopTap,
       child: Container(
         width: double.infinity,
-        constraints: BoxConstraints(minHeight: compact ? 90 : 58),
+        constraints: BoxConstraints(minHeight: compact ? 100: 100),
         decoration: BoxDecoration(
           gradient: const LinearGradient(
             colors: [Color(0xFF6B0000), AppColors.eStopColor],
@@ -1060,7 +1068,7 @@ Future<bool?> _showExitConfirmationDialog() {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'EMERGENCY STOP',
+                  'STOP',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -1813,13 +1821,12 @@ class _RSSIBadge extends StatelessWidget {
     );
   }
 }
+
 class _ExitConfirmationDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: const Row(
         children: [
           Icon(
@@ -1830,10 +1837,7 @@ class _ExitConfirmationDialog extends StatelessWidget {
           SizedBox(width: 8),
           Text(
             'Exit Control Screen?',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
-            ),
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
           ),
         ],
       ),
@@ -1857,10 +1861,7 @@ class _ExitConfirmationDialog extends StatelessWidget {
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(10),
             ),
-            padding: const EdgeInsets.symmetric(
-              horizontal: 20,
-              vertical: 12,
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           ),
           child: const Text(
             'STAY',
@@ -1874,10 +1875,7 @@ class _ExitConfirmationDialog extends StatelessWidget {
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(10),
             ),
-            padding: const EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: 12,
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           ),
           child: const Text(
             'DISCONNECT & EXIT',

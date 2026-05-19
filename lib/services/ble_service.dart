@@ -85,7 +85,7 @@ class BleService {
   static const int _safeStateMaxAttempts = 3;
   static const Duration _safeStateAckTimeout = Duration(milliseconds: 1200);
 
-  void _emit(BleConnectionStatus status, {String? message}) {
+  void _emit(BleConnectionStatus status, {String? message}) { 
     if (_isDisposing || _connectionController.isClosed) {
       return;
     }
@@ -301,10 +301,10 @@ class BleService {
       _device!.cancelWhenDisconnected(_authSubscription!, next: true);
       _device!.cancelWhenDisconnected(_statusSubscription!, next: true);
 
-      _emit(
-        BleConnectionStatus.connecting,
-        message: 'Synchronizing safe state with PLC...',
-      );
+      // _emit(
+      //   BleConnectionStatus.connecting,
+      //   message: 'Synchronizing safe state with PLC...',
+      // );
       await _sendSafeStatePreAuthBestEffort();
       _emit(BleConnectionStatus.awaitingAuthentication);
     } catch (e) {
