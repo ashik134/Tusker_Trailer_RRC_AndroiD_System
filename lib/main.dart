@@ -28,6 +28,7 @@ class TuskerRRCApp extends StatelessWidget {
       child: MaterialApp(
         title: AppConstants.appTitle,
         theme: AppTheme.theme,
+        showPerformanceOverlay: false,
         debugShowCheckedModeBanner: false,
         home: StartupSplashScreen(
           destinationBuilder: (_) => const CraneAppShell(),
