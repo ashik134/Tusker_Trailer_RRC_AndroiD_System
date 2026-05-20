@@ -1,31 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'dart:async';
+
 import 'package:provider/provider.dart';
 import 'package:vibration/vibration.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'package:tusker_trailer_rrc/utils/constants.dart';
-import 'package:tusker_trailer_rrc/controllers/crane_controllers.dart';
 import 'package:tusker_trailer_rrc/models/plc_output_command.dart';
 import 'package:tusker_trailer_rrc/widgets/estop_swipe_button.dart';
+import 'package:tusker_trailer_rrc/controllers/crane_controllers.dart';
 
-// ═══════════════════════════════════════════════════════════════
-// ControlScreen — Deadman Hold-to-Run Industrial Controls
-//
-// Behavior:
-//   • UP button pressed  → Output ON [0,1,0]
-//   • UP button released → Output OFF [0,0,0]
-//   • DOWN button pressed  → Output ON [0,0,1]
-//   • DOWN button released → Output OFF [0,0,0]
-//
-// Safety Rules:
-//   • Only ONE direction active at any time
-//   • UP active → DOWN disabled
-//   • DOWN active → UP disabled
-//   • Mutual exclusion enforced in hardware AND software
-//   • Both buttons released → IDLE
-// ═══════════════════════════════════════════════════════════════
 
 class ControlScreen extends StatefulWidget {
   const ControlScreen({super.key});
@@ -443,7 +429,7 @@ class _ControlScreenState extends State<ControlScreen>
       await controller.disconnect();
     }
   }
-
+        
   /// Shows exit confirmation dialog.
   /// This method is safe because it only uses the context
   /// provided directly to [showDialog].

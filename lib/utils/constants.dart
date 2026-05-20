@@ -144,4 +144,3 @@ const Map<ControlState, List<int>> plcOutputDown = {
   ControlState.fast: [0, 0, 1, 1],
 };
 
-const List<int> plcConflict = [0, 0, 0, 0];
