@@ -64,6 +64,7 @@ class BleService {
   BluetoothCharacteristic? _digitalChar;
   BluetoothCharacteristic? _authChar;
   BluetoothCharacteristic? _statusChar;
+  BluetoothCharacteristic? _heartbeatChar;
 
   StreamSubscription<BluetoothConnectionState>? _connStateSub;
   StreamSubscription<List<int>>? _analogSubscription;
@@ -78,6 +79,9 @@ class BleService {
 
   // ── Live RSSI polling ───────────────────────────────────────────────────────
   Timer? _rssiTimer;
+
+  // ── Heartbeat timer ──────────────────────────────────────────────────────────
+  Timer? _heartbeatTimer;
 
   // ── Continuous scan control ─────────────────────────────────────────────────
   bool _scanShouldContinue = false;
@@ -258,6 +262,8 @@ class BleService {
             auth = char;
           } else if (uuid == BLEConstants.statusCharUuid.toLowerCase()) {
             status = char;
+          } else if (uuid == BLEConstants.heartbeatCharUuid.toLowerCase()) {
+            _heartbeatChar = char;
           }
         }
       }
@@ -277,6 +283,7 @@ class BleService {
       _digitalChar = digital;
       _authChar = auth;
       _statusChar = status;
+      // _heartbeatChar was assigned inline above (optional — no error if absent).
 
       if (_analogChar != null) {
         await _analogChar!.setNotifyValue(true);
@@ -319,6 +326,7 @@ class BleService {
 
   Future<void> disconnect({bool emitState = true}) async {
     _stopRssiPolling(); // Stop polling before tearing down the BLE link.
+    _stopHeartbeat(); // Stop heartbeat before tearing down the BLE link.
     _pendingAuthCompleter?.complete(BleAuthOutcome.failed);
     _pendingAuthCompleter = null;
     final pendingSafeState = _pendingSafeStateCompleter;
@@ -352,6 +360,7 @@ class BleService {
     _digitalChar = null;
     _authChar = null;
     _statusChar = null;
+    _heartbeatChar = null;
 
     if (device != null && device.isConnected) {
       await device.disconnect();
@@ -369,6 +378,7 @@ class BleService {
       return;
     }
     _stopRssiPolling();
+    _stopHeartbeat();
     _device = null;
     _connectedDevice = null;
     _connStateSub?.cancel();
@@ -377,6 +387,7 @@ class BleService {
     _authChar = null;
     _digitalChar = null;
     _statusChar = null;
+    _heartbeatChar = null;
     _analogSubscription?.cancel();
     _authSubscription?.cancel();
     _statusSubscription?.cancel();
@@ -535,6 +546,7 @@ class BleService {
       _pendingAuthCompleter?.complete(BleAuthOutcome.success);
       _pendingAuthCompleter = null;
       _startRssiPolling(); // Begin live RSSI updates now that the session is fully up.
+      _startHeartbeat(); // Begin 100 ms heartbeat to signal connection health to PLC.
     } catch (error) {
       _pendingAuthCompleter?.complete(BleAuthOutcome.failed);
       _pendingAuthCompleter = null;
@@ -598,6 +610,40 @@ class BleService {
   /// On each tick: reads RSSI from the BLE device, reconstructs
   /// [_connectedDevice] with the fresh value, then re-emits the current
   /// connection state so every UI consumer rebuilds with live signal strength.
+  // ── Heartbeat helpers ─────────────────────────────────────────────────────
+
+  /// Starts a 100 ms periodic timer that writes "HB" to the heartbeat
+  /// characteristic. The PLC uses the absence of this signal to detect
+  /// connection loss and enter a safe state.
+  void _startHeartbeat() {
+    _heartbeatTimer?.cancel();
+    if (_heartbeatChar == null) {
+      _logger.w('Heartbeat characteristic not found — heartbeat disabled.');
+      return;
+    }
+    _heartbeatTimer = Timer.periodic(SafetyConstants.heartbeatInterval, (
+      _,
+    ) async {
+      final char = _heartbeatChar;
+      if (char == null || _isDisposing) return;
+      try {
+        await char.write(
+          utf8.encode(BLEConstants.heartbeatPayload),
+          withoutResponse: true,
+        );
+      } catch (e) {
+        _logger.w('Heartbeat write failed: $e');
+      }
+    });
+  }
+
+  void _stopHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
+  }
+
+  // ── Live RSSI helpers ─────────────────────────────────────────────────────
+
   void _startRssiPolling() {
     _rssiTimer?.cancel();
     _rssiTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
@@ -659,6 +705,7 @@ class BleService {
   void dispose() {
     _isDisposing = true;
     _stopRssiPolling();
+    _stopHeartbeat();
     _scanResultsSub?.cancel();
     _analogSubscription?.cancel();
     _authSubscription?.cancel();
@@ -676,6 +723,7 @@ class BleService {
     _digitalChar = null;
     _authChar = null;
     _statusChar = null;
+    _heartbeatChar = null;
     if (device != null && device.isConnected) {
       device.disconnect();
     }

@@ -130,7 +130,7 @@ class _StartupSplashScreenState extends State<StartupSplashScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: ConnectionColors.background,
+      backgroundColor:  Colors.white,
       body: Center(
         child: FadeTransition(
           opacity: _fadeAnimation,

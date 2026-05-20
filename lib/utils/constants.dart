@@ -4,11 +4,10 @@ class AppConstants {
   static const String plcName = 'PLC 14';
   static const String appTitle = 'Tusker Hauler RRC';
   static const String appVersion = '1.0.0';
+  
   static const String prefsKeyEmail = 'saved_email';
   static const String prefsKeyPassword = 'saved_password';
   static const String prefsKeyDeviceId = 'last_device_id';
-  static const String defaultAdminEmail = 'admin@plc.com';
-  static const String defaultAdminPassword = 'Admin123';
 }
 
 class BLEConstants {
@@ -17,6 +16,7 @@ class BLEConstants {
   static const String digitalCharUuid = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
   static const String authCharUuid = '6e400004-b5a3-f393-e0a9-e50e24dcca9e';
   static const String statusCharUuid = '6e400005-b5a3-f393-e0a9-e50e24dcca9e';
+  static const String heartbeatCharUuid = '6e400006-b5a3-f393-e0a9-e50e24dcca9e';
 
   static const String deviceName = 'RRC_PLC';
   static const String scanNamePrefix = 'RRC_';
@@ -25,12 +25,15 @@ class BLEConstants {
   static const String authSuccess = 'AUTH_OK';
   static const String authFailed = 'AUTH_FAIL';
   static const String authTimeout = 'AUTH_TIMEOUT';
+
+  static const String heartbeatPayload = 'HB';
 }
 
 class SafetyConstants {
   static const Duration scanTimeout = Duration(seconds: 8);
   static const Duration authReplyTimeout = Duration(seconds: 6);
   static const Duration estopPulse = Duration(milliseconds: 300);
+  static const Duration heartbeatInterval = Duration(milliseconds: 100);
 }
 
 class AppColors {
