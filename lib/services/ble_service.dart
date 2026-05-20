@@ -604,12 +604,6 @@ class BleService {
     }
   }
 
-  // ── Live RSSI helpers ─────────────────────────────────────────────────────
-
-  /// Starts periodic RSSI polling (every 3 s) for the active connection.
-  /// On each tick: reads RSSI from the BLE device, reconstructs
-  /// [_connectedDevice] with the fresh value, then re-emits the current
-  /// connection state so every UI consumer rebuilds with live signal strength.
   // ── Heartbeat helpers ─────────────────────────────────────────────────────
 
   /// Starts a 100 ms periodic timer that writes "HB" to the heartbeat
@@ -644,6 +638,10 @@ class BleService {
 
   // ── Live RSSI helpers ─────────────────────────────────────────────────────
 
+  /// Starts periodic RSSI polling (every 3 s) for the active connection.
+  /// On each tick: reads RSSI from the BLE device, reconstructs
+  /// [_connectedDevice] with the fresh value, then re-emits the current
+  /// connection state so every UI consumer rebuilds with live signal strength.
   void _startRssiPolling() {
     _rssiTimer?.cancel();
     _rssiTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
