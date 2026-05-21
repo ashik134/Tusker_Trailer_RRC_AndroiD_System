@@ -673,6 +673,38 @@ class BleService {
       'writeWithoutResponse=$useWithoutResponse',
     );
 
+    // ── Firmware capability check ───────────────────────────────────────────
+    // The ESP32 characteristic must declare PROPERTY_WRITE_NO_RESPONSE to
+    // enable ATT WRITE COMMAND (fire-and-forget, ~0 ms latency).
+    // Without it, every write is an ATT WRITE REQUEST that requires a full
+    // round-trip ACK (~15 ms at HIGH priority).  Because Android's main
+    // thread handles both BLE platform-channel calls and Flutter UI rendering,
+    // a heavy frame (100-125 ms) delays write dispatch by the same amount —
+    // which can push the PLC gap to ~140 ms and trigger miss-count warnings.
+    //
+    // FIRMWARE FIX (one line in the ESP32 sketch):
+    //   BEFORE: pService->createCharacteristic(UUID, PROPERTY_WRITE)
+    //   AFTER:  pService->createCharacteristic(UUID,
+    //             PROPERTY_WRITE | PROPERTY_WRITE_NO_RESPONSE)
+    //
+    // Flutter will then automatically detect writeWithoutResponse=true here
+    // and switch to ATT WRITE COMMAND, eliminating all timing sensitivity.
+    if (!useWithoutResponse) {
+      _logger.w(
+        'HB: ESP32 characteristic declares PROPERTY_WRITE only — '
+        'using ATT WRITE REQUEST (with ACK, ~15 ms round-trip). '
+        'Add PROPERTY_WRITE_NO_RESPONSE to the firmware characteristic '
+        'to enable fire-and-forget writes and eliminate Android '
+        'main-thread timing sensitivity.',
+      );
+      debugPrint(
+        '[HB] ⚠ writeWithoutResponse=false — '
+        'FIRMWARE ACTION REQUIRED: add '
+        'BLECharacteristic::PROPERTY_WRITE_NO_RESPONSE to the '
+        'heartbeat characteristic declaration on the ESP32.',
+      );
+    }
+
     _heartbeatActive = true;
     _hbTickCount = 0;
     _hbDispatchCount = 0;
