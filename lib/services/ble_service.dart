@@ -643,13 +643,21 @@ class BleService {
 
   // ── Heartbeat helpers ─────────────────────────────────────────────────────
 
-  int _hbSentCount = 0;
+  int _hbTickCount = 0;      // total timer ticks fired (including throttled)
+  int _hbDispatchCount = 0;  // actual write dispatches sent to flutter_blue_plus
+  // Wall-clock time of the most recent timer tick — for interval measurement.
+  DateTime? _hbLastTickTime;
+  // Wall-clock time of the most recent actual dispatch — for throttle guard.
+  // Using elapsed time instead of a Dart callback flag avoids the cascade-skip
+  // problem: when Android's main thread is busy rendering, both the platform-
+  // channel write call AND its .then() callback are delayed by the same stall.
+  // Waiting for the callback causes 3-4 consecutive ticks to skip, creating a
+  // 300-400 ms PLC gap.  A 50 ms wall-clock threshold is independent of any
+  // Dart/Android callback and is always wider than the ~15 ms BLE round-trip.
+  DateTime? _hbLastDispatchTime;
 
-  /// Starts the heartbeat timer. Timer.periodic is used instead of a
-  /// Future.delayed loop because periodic timers fire at fixed wall-clock
-  /// intervals regardless of how long the previous callback took or how much
-  /// other work is queued in the event loop.  This guarantees the PLC receives
-  /// 'HB' every 100 ms even during rapid motion control or UI activity.
+  /// Starts the heartbeat timer. Timer.periodic fires at fixed wall-clock
+  /// intervals regardless of event-loop backlog.
   void _startHeartbeat() {
     _stopHeartbeat();
     if (_heartbeatChar == null) {
@@ -658,9 +666,6 @@ class BleService {
       return;
     }
 
-    // Prefer WRITE_WITHOUT_RESPONSE so every tick completes at the BLE MAC
-    // layer instantly (no ATT round-trip).  Fall back to WRITE if the
-    // characteristic does not declare that property.
     final bool useWithoutResponse =
         _heartbeatChar!.properties.writeWithoutResponse;
     debugPrint(
@@ -669,7 +674,10 @@ class BleService {
     );
 
     _heartbeatActive = true;
-    _hbSentCount = 0;
+    _hbTickCount = 0;
+    _hbDispatchCount = 0;
+    _hbLastTickTime = null;
+    _hbLastDispatchTime = null;
 
     _heartbeatTimer = Timer.periodic(
       SafetyConstants.heartbeatInterval,
@@ -677,28 +685,71 @@ class BleService {
     );
   }
 
-  /// Called on every timer tick. Writes are fire-and-forget — we never await
-  /// them so the timer callback returns immediately and the next tick is never
-  /// delayed by a slow ATT ACK.  A 90 ms hard timeout ensures that a stalled
-  /// BLE write is abandoned before the following tick is due, preventing the
-  /// GATT queue from accumulating more than one pending HB operation.
+  /// Called on every timer tick.
+  ///
+  /// Two concerns are handled independently:
+  ///
+  /// 1. Interval measurement — recorded at the top of every tick (including
+  ///    throttled ones) using wall-clock time so the log reflects true
+  ///    Timer.periodic cadence regardless of write completion.
+  ///
+  /// 2. Dispatch throttle — time-based, NOT callback-based.  When
+  ///    Android's main thread is busy rendering, the platform-channel call
+  ///    is queued on Android's Looper and may not execute for 100+ ms.  Both
+  ///    the write itself AND its .then() callback suffer the same delay.
+  ///    Waiting for the callback (the old _hbWriteInFlight approach) causes
+  ///    3-4 consecutive ticks to skip, creating a 300-400 ms PLC gap.
+  ///    Instead, we allow a new dispatch as soon as 50 ms have elapsed since
+  ///    the previous one — well past the ~15 ms BLE round-trip, but without
+  ///    coupling to any delayed Dart callback.
   void _sendHeartbeatTick(bool useWithoutResponse) {
     if (!_heartbeatActive || _isDisposing) return;
     final char = _heartbeatChar;
     if (char == null) return;
+
+    final now = DateTime.now();
+    _hbTickCount++;
+
+    // ── Interval measurement (every tick) ──────────────────────────────────
+    final prev = _hbLastTickTime;
+    _hbLastTickTime = now;
+    if (prev != null) {
+      final intervalMs = now.difference(prev).inMilliseconds;
+      final label = (intervalMs > 130 || intervalMs < 70)
+          ? '[HB] ⚠ INTERVAL'
+          : '[HB] interval';
+      debugPrint('$label = ${intervalMs}ms (tick #$_hbTickCount)');
+      if (intervalMs > 130 || intervalMs < 70) {
+        _logger.w('HB timer interval anomaly: ${intervalMs}ms (expected ~100ms)');
+      }
+    }
+
+    // ── Dispatch throttle (time-based) ─────────────────────────────────────
+    final lastDispatch = _hbLastDispatchTime;
+    if (lastDispatch != null) {
+      final msSince = now.difference(lastDispatch).inMilliseconds;
+      if (msSince < 50) {
+        // Catch-up tick fired too soon after the last dispatch — throttle it.
+        // This keeps GATT queue depth ≤ 2 without waiting for callbacks.
+        debugPrint(
+          '[HB] tick #$_hbTickCount throttled (${msSince}ms since last dispatch)',
+        );
+        return;
+      }
+    }
+
+    // ── Dispatch ───────────────────────────────────────────────────────────
+    _hbLastDispatchTime = now;
+    _hbDispatchCount++;
+    if (_hbDispatchCount <= 5 || _hbDispatchCount % 10 == 0) {
+      debugPrint('[HB] HB dispatched (#$_hbDispatchCount)');
+    }
 
     char
         .write(
           utf8.encode(BLEConstants.heartbeatPayload),
           withoutResponse: useWithoutResponse,
         )
-        .timeout(const Duration(milliseconds: 90))
-        .then((_) {
-          _hbSentCount++;
-          if (_hbSentCount <= 5 || _hbSentCount % 10 == 0) {
-            debugPrint('[HB] HB sent (#$_hbSentCount)');
-          }
-        })
         .catchError((Object e) {
           _logger.w('Heartbeat write failed: $e');
           debugPrint('[HB] write error: $e');
@@ -709,6 +760,8 @@ class BleService {
     _heartbeatActive = false;
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
+    _hbLastTickTime = null;
+    _hbLastDispatchTime = null;
   }
 
   // ── Live RSSI helpers ─────────────────────────────────────────────────────
