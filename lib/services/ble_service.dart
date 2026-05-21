@@ -80,8 +80,12 @@ class BleService {
   // ── Live RSSI polling ───────────────────────────────────────────────────────
   Timer? _rssiTimer;
 
-  // ── Heartbeat timer ──────────────────────────────────────────────────────────
-  Timer? _heartbeatTimer;
+  // ── Heartbeat loop ──────────────────────────────────────────────────────────
+  // Uses a dedicated async loop (not Timer.periodic) so that fire-and-forget
+  // writes never accumulate in the BLE GATT queue and each 100 ms interval is
+  // measured independently of write completion time.
+  bool _heartbeatActive = false;
+  bool _hbWriteInFlight = false;
 
   // ── Continuous scan control ─────────────────────────────────────────────────
   bool _scanShouldContinue = false;
@@ -245,6 +249,7 @@ class BleService {
       _authChar = null;
       _analogChar = null;
       _statusChar = null;
+      _heartbeatChar = null; // reset before each discovery pass
 
       for (final service in services) {
         if (service.uuid.toString().toLowerCase() !=
@@ -254,6 +259,12 @@ class BleService {
 
         for (final char in service.characteristics) {
           final uuid = char.uuid.toString().toLowerCase();
+          debugPrint(
+            '[BLE] Char discovered: $uuid '
+            '| write=${char.properties.write} '
+            '| writeNoResp=${char.properties.writeWithoutResponse} '
+            '| notify=${char.properties.notify}',
+          );
           if (uuid == BLEConstants.digitalCharUuid.toLowerCase()) {
             digital = char;
           } else if (uuid == BLEConstants.analogCharUuid.toLowerCase()) {
@@ -264,6 +275,11 @@ class BleService {
             status = char;
           } else if (uuid == BLEConstants.heartbeatCharUuid.toLowerCase()) {
             _heartbeatChar = char;
+            debugPrint(
+              '[BLE] Heartbeat characteristic found '
+              '(write=${char.properties.write}, '
+              'writeNoResp=${char.properties.writeWithoutResponse})',
+            );
           }
         }
       }
@@ -284,6 +300,13 @@ class BleService {
       _authChar = auth;
       _statusChar = status;
       // _heartbeatChar was assigned inline above (optional — no error if absent).
+      if (_heartbeatChar == null) {
+        debugPrint(
+          '[BLE] WARNING: Heartbeat characteristic NOT found '
+          '(UUID: ${BLEConstants.heartbeatCharUuid}). '
+          'Heartbeat will be disabled.',
+        );
+      }
 
       if (_analogChar != null) {
         await _analogChar!.setNotifyValue(true);
@@ -606,34 +629,90 @@ class BleService {
 
   // ── Heartbeat helpers ─────────────────────────────────────────────────────
 
-  /// Starts a 100 ms periodic timer that writes "HB" to the heartbeat
-  /// characteristic. The PLC uses the absence of this signal to detect
-  /// connection loss and enter a safe state.
+  /// Starts the independent heartbeat loop that writes "HB" to the heartbeat
+  /// characteristic every 100 ms. The loop runs on its own async fiber so it
+  /// is never blocked by button/command writes, RSSI polls, or UI events.
+  int _hbSentCount = 0;
+
   void _startHeartbeat() {
-    _heartbeatTimer?.cancel();
+    _stopHeartbeat(); // clear any previous loop before starting a new one
     if (_heartbeatChar == null) {
       _logger.w('Heartbeat characteristic not found — heartbeat disabled.');
+      debugPrint('[HB] ERROR: _heartbeatChar is null — heartbeat NOT started.');
       return;
     }
-    _heartbeatTimer = Timer.periodic(SafetyConstants.heartbeatInterval, (
-      _,
-    ) async {
+
+    // Prefer WRITE_WITHOUT_RESPONSE so writes complete immediately at the BLE
+    // stack level without waiting for an ATT acknowledgement.  If the
+    // characteristic only declares WRITE (with response) we fall back to that,
+    // but the loop guards against concurrent writes with _hbWriteInFlight so a
+    // slow ACK round-trip never queues up multiple pending writes.
+    final bool useWithoutResponse =
+        _heartbeatChar!.properties.writeWithoutResponse;
+    debugPrint(
+      '[HB] Heartbeat started — interval=100ms '
+      'writeWithoutResponse=$useWithoutResponse',
+    );
+
+    _heartbeatActive = true;
+    _hbWriteInFlight = false;
+    _hbSentCount = 0;
+    _runHeartbeatLoop(useWithoutResponse).ignore();
+  }
+
+  /// Independent async heartbeat loop.
+  ///
+  /// Each iteration:
+  ///   1. Fires a BLE write as fire-and-forget (no `await`) using
+  ///      [_hbWriteInFlight] to skip the tick if a previous write is still
+  ///      in progress — preventing GATT queue build-up.
+  ///   2. Sleeps for exactly [SafetyConstants.heartbeatInterval] (100 ms),
+  ///      measured from the START of each iteration so timing is independent
+  ///      of write completion.
+  Future<void> _runHeartbeatLoop(bool useWithoutResponse) async {
+    debugPrint('[HB] Heartbeat loop running');
+    while (_heartbeatActive && !_isDisposing) {
       final char = _heartbeatChar;
-      if (char == null || _isDisposing) return;
-      try {
-        await char.write(
-          utf8.encode(BLEConstants.heartbeatPayload),
-          withoutResponse: true,
-        );
-      } catch (e) {
-        _logger.w('Heartbeat write failed: $e');
+      if (char == null) break;
+
+      if (!_hbWriteInFlight) {
+        _hbWriteInFlight = true;
+        // Fire-and-forget: do NOT await the write.
+        // The 100 ms sleep below is the sole timing source, so the loop never
+        // stalls waiting for a BLE ACK and no concurrent writes can queue up.
+        char
+            .write(
+              utf8.encode(BLEConstants.heartbeatPayload),
+              withoutResponse: useWithoutResponse,
+            )
+            .then((_) {
+              _hbWriteInFlight = false;
+              _hbSentCount++;
+              // Log first 5 sends then every 10th (~1 s) to confirm the loop
+              // is alive without flooding the console.
+              if (_hbSentCount <= 5 || _hbSentCount % 10 == 0) {
+                debugPrint('[HB] HB sent (#$_hbSentCount)');
+              }
+            })
+            .catchError((Object e) {
+              _hbWriteInFlight = false;
+              _logger.w('Heartbeat write failed: $e');
+              debugPrint('[HB] write error: $e');
+            });
+      } else {
+        // Previous write still in flight — skip this tick rather than queue.
+        // One skipped tick is within PLC tolerance (300 ms window).
+        debugPrint('[HB] write still in flight — tick skipped');
       }
-    });
+
+      await Future.delayed(SafetyConstants.heartbeatInterval);
+    }
+    debugPrint('[HB] Heartbeat loop ended');
   }
 
   void _stopHeartbeat() {
-    _heartbeatTimer?.cancel();
-    _heartbeatTimer = null;
+    _heartbeatActive = false;
+    _hbWriteInFlight = false;
   }
 
   // ── Live RSSI helpers ─────────────────────────────────────────────────────
