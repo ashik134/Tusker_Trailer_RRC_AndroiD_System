@@ -1,14 +1,16 @@
+import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 
 import 'package:logger/logger.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+
+import 'package:tusker_trailer_rrc/utils/constants.dart';
 
 import 'package:tusker_trailer_rrc/models/ble_scan_device.dart';
 import 'package:tusker_trailer_rrc/models/plc_output_command.dart';
-import 'package:tusker_trailer_rrc/utils/constants.dart';
 
 enum BleConnectionStatus {
   disconnected,
@@ -40,40 +42,35 @@ class BleConnectionState {
 }
 
 class BleService {
-  final Logger _logger = Logger(printer: PrettyPrinter(methodCount: 0));
+  final Logger _logger = Logger(printer: SimplePrinter(colors: true));
 
   final StreamController<BleConnectionState> _connectionController =
       StreamController<BleConnectionState>.broadcast();
   final StreamController<List<BleScanDevice>> _scanController =
       StreamController<List<BleScanDevice>>.broadcast();
-  final StreamController<Map<String, int>> _analogController =
-      StreamController<Map<String, int>>.broadcast();
   final StreamController<PlcOutputCommand> _statusController =
       StreamController<PlcOutputCommand>.broadcast();
 
   Stream<BleConnectionState> get connectionStream =>
       _connectionController.stream;
   Stream<List<BleScanDevice>> get scanStream => _scanController.stream;
-  Stream<Map<String, int>> get analogStream => _analogController.stream;
   Stream<PlcOutputCommand> get statusStream => _statusController.stream;
 
   BleConnectionState _snapshot = BleConnectionState.initial();
   BluetoothDevice? _device;
-  BleScanDevice? _connectedDevice;
-  BluetoothCharacteristic? _analogChar;
+  BleScanDevice? _connectedDevice; 
+
   BluetoothCharacteristic? _digitalChar;
   BluetoothCharacteristic? _authChar;
   BluetoothCharacteristic? _statusChar;
   BluetoothCharacteristic? _heartbeatChar;
 
   StreamSubscription<BluetoothConnectionState>? _connStateSub;
-  StreamSubscription<List<int>>? _analogSubscription;
   StreamSubscription<List<int>>? _authSubscription;
   StreamSubscription<List<int>>? _statusSubscription;
   StreamSubscription<List<ScanResult>>? _scanResultsSub;
 
-  Completer<BleAuthOutcome>?
-  _pendingAuthCompleter; // For tracking ongoing authentication attempts.
+  Completer<BleAuthOutcome>? _pendingAuthCompleter;
   Completer<void>? _pendingSafeStateCompleter;
   bool _isDisposing = false;
 
@@ -81,9 +78,6 @@ class BleService {
   Timer? _rssiTimer;
 
   // ── Heartbeat loop ──────────────────────────────────────────────────────────
-  // Timer.periodic fires at wall-clock intervals regardless of event-loop
-  // backlog (BLE callbacks, UI redraws, RSSI polls). Unlike a Future.delayed
-  // loop, the next tick is never pushed back by pending async work.
   bool _heartbeatActive = false;
   Timer? _heartbeatTimer;
 
@@ -93,7 +87,7 @@ class BleService {
   static const int _safeStateMaxAttempts = 3;
   static const Duration _safeStateAckTimeout = Duration(milliseconds: 1200);
 
-  void _emit(BleConnectionStatus status, {String? message}) { 
+  void _emit(BleConnectionStatus status, {String? message}) {
     if (_isDisposing || _connectionController.isClosed) {
       return;
     }
@@ -113,10 +107,6 @@ class BleService {
     _emit(BleConnectionStatus.scanning);
     _scanShouldContinue = true;
 
-    // Single persistent subscription for the entire scan session.
-    // FlutterBluePlus.scanResults emits the full, de-duplicated list of all
-    // seen devices with their LATEST RSSI on every new advertisement —
-    // so RSSI is live throughout the session without extra work.
     _scanResultsSub = FlutterBluePlus.scanResults.listen(
       (results) {
         final seen = <String>{};
@@ -128,7 +118,6 @@ class BleService {
                   ? advertisedName
                   : platformName;
 
-              // Ignore unnamed devices and only include configurable PLC names.
               return resolvedName.isNotEmpty &&
                   resolvedName.startsWith(BLEConstants.scanNamePrefix);
             })
@@ -148,9 +137,6 @@ class BleService {
       },
     );
 
-    // Continuous scan loop: run 8-second bursts with a brief gap so that
-    // FlutterBluePlus keeps receiving fresh advertisements (and thus fresh
-    // RSSI values) for as long as the user is on the scan page.
     while (_scanShouldContinue && !_isDisposing) {
       try {
         await FlutterBluePlus.startScan(
@@ -241,13 +227,13 @@ class BleService {
   Future<void> _discoverServices() async {
     try {
       final services = await _device!.discoverServices();
-      BluetoothCharacteristic? analog;
+
       BluetoothCharacteristic? digital;
       BluetoothCharacteristic? auth;
       BluetoothCharacteristic? status;
       _digitalChar = null;
       _authChar = null;
-      _analogChar = null;
+
       _statusChar = null;
       _heartbeatChar = null; // reset before each discovery pass
 
@@ -267,8 +253,6 @@ class BleService {
           );
           if (uuid == BLEConstants.digitalCharUuid.toLowerCase()) {
             digital = char;
-          } else if (uuid == BLEConstants.analogCharUuid.toLowerCase()) {
-            analog = char;
           } else if (uuid == BLEConstants.authCharUuid.toLowerCase()) {
             auth = char;
           } else if (uuid == BLEConstants.statusCharUuid.toLowerCase()) {
@@ -295,7 +279,6 @@ class BleService {
         return;
       }
 
-      _analogChar = analog;
       _digitalChar = digital;
       _authChar = auth;
       _statusChar = status;
@@ -308,16 +291,9 @@ class BleService {
         );
       }
 
-      if (_analogChar != null) {
-        await _analogChar!.setNotifyValue(true);
-      }
       await _authChar!.setNotifyValue(true);
       await _statusChar!.setNotifyValue(true);
-      if (_analogChar != null) {
-        _analogSubscription = _analogChar!.onValueReceived.listen(
-          _handleAnalogNotification,
-        );
-      }
+
       _authSubscription = _authChar!.onValueReceived.listen(
         _handleAuthNotification,
       );
@@ -325,9 +301,6 @@ class BleService {
         _handleStatusNotification,
       );
 
-      if (_analogSubscription != null) {
-        _device!.cancelWhenDisconnected(_analogSubscription!, next: true);
-      }
       _device!.cancelWhenDisconnected(_authSubscription!, next: true);
       _device!.cancelWhenDisconnected(_statusSubscription!, next: true);
 
@@ -369,17 +342,16 @@ class BleService {
       }
     }
 
-    await _analogSubscription?.cancel();
     await _authSubscription?.cancel();
     await _statusSubscription?.cancel();
     await _connStateSub?.cancel();
-    _analogSubscription = null;
+
     _authSubscription = null;
     _statusSubscription = null;
     _connStateSub = null;
 
     _device = null;
-    _analogChar = null;
+
     _digitalChar = null;
     _authChar = null;
     _statusChar = null;
@@ -406,58 +378,22 @@ class BleService {
     _connectedDevice = null;
     _connStateSub?.cancel();
     _connStateSub = null;
-    _analogChar = null;
+
     _authChar = null;
     _digitalChar = null;
     _statusChar = null;
     _heartbeatChar = null;
-    _analogSubscription?.cancel();
+
     _authSubscription?.cancel();
     _statusSubscription?.cancel();
-    _analogSubscription = null;
+
     _authSubscription = null;
     _statusSubscription = null;
-    if (!_analogController.isClosed) {
-      _analogController.add(const {'A1': 0, 'A2': 0});
-    }
+
     if (!_statusController.isClosed) {
       _statusController.add(PlcOutputCommand.idle());
     }
     _emit(BleConnectionStatus.disconnected);
-  }
-
-  // ── Characteristic callbacks ───────────────────────────────────────────────
-
-  // Keeps the last known values so single-channel updates don't zero out the other channel.
-  final Map<String, int> _lastAnalog = {'A1': 0, 'A2': 0};
-
-  void _handleAnalogNotification(List<int> bytes) {
-    final payload = utf8.decode(bytes).trim();
-    final parts = payload.split(',');
-
-    try {
-      final updated = Map<String, int>.from(_lastAnalog);
-      for (final part in parts) {
-        final kv = part.split(':');
-        if (kv.length != 2) {
-          _logger.w('Unexpected analog token: $part');
-          continue;
-        }
-        final key = kv[0].trim();
-        final value = int.parse(kv[1].trim());
-        if (updated.containsKey(key)) {
-          updated[key] = value;
-        } else {
-          _logger.w('Unknown analog key: $key');
-        }
-      }
-      _lastAnalog
-        ..['A1'] = updated['A1']!
-        ..['A2'] = updated['A2']!;
-      _analogController.add(Map.unmodifiable(updated));
-    } catch (error) {
-      _logger.e('Analog parse error', error: error);
-    }
   }
 
   void _handleStatusNotification(List<int> bytes) {
@@ -565,10 +501,7 @@ class BleService {
 
     try {
       await _sendSafeStateAndAwaitAck();
-      // Request a high-priority BLE connection on Android so the controller
-      // reduces the connection interval to 7.5–15 ms.  This dramatically cuts
-      // GATT write round-trip time and ensures the 100 ms heartbeat can always
-      // be delivered without contending with digital-control writes.
+
       if (!kIsWeb && Platform.isAndroid) {
         try {
           await _device!.requestConnectionPriority(
@@ -608,9 +541,7 @@ class BleService {
 
     _pendingAuthCompleter?.complete(BleAuthOutcome.failed);
     _pendingAuthCompleter = Completer<BleAuthOutcome>();
-    // Capture the future NOW before the write, so a fast notification that
-    // nulls out _pendingAuthCompleter during the await cannot cause a
-    // null-check crash on line below.
+
     final authFuture = _pendingAuthCompleter!.future;
     _emit(BleConnectionStatus.authenticating);
 
@@ -643,21 +574,13 @@ class BleService {
 
   // ── Heartbeat helpers ─────────────────────────────────────────────────────
 
-  int _hbTickCount = 0;      // total timer ticks fired (including throttled)
-  int _hbDispatchCount = 0;  // actual write dispatches sent to flutter_blue_plus
-  // Wall-clock time of the most recent timer tick — for interval measurement.
+  int _hbTickCount = 0;
+  int _hbDispatchCount = 0;
+
   DateTime? _hbLastTickTime;
-  // Wall-clock time of the most recent actual dispatch — for throttle guard.
-  // Using elapsed time instead of a Dart callback flag avoids the cascade-skip
-  // problem: when Android's main thread is busy rendering, both the platform-
-  // channel write call AND its .then() callback are delayed by the same stall.
-  // Waiting for the callback causes 3-4 consecutive ticks to skip, creating a
-  // 300-400 ms PLC gap.  A 50 ms wall-clock threshold is independent of any
-  // Dart/Android callback and is always wider than the ~15 ms BLE round-trip.
+
   DateTime? _hbLastDispatchTime;
 
-  /// Starts the heartbeat timer. Timer.periodic fires at fixed wall-clock
-  /// intervals regardless of event-loop backlog.
   void _startHeartbeat() {
     _stopHeartbeat();
     if (_heartbeatChar == null) {
@@ -676,19 +599,7 @@ class BleService {
     // ── Firmware capability check ───────────────────────────────────────────
     // The ESP32 characteristic must declare PROPERTY_WRITE_NO_RESPONSE to
     // enable ATT WRITE COMMAND (fire-and-forget, ~0 ms latency).
-    // Without it, every write is an ATT WRITE REQUEST that requires a full
-    // round-trip ACK (~15 ms at HIGH priority).  Because Android's main
-    // thread handles both BLE platform-channel calls and Flutter UI rendering,
-    // a heavy frame (100-125 ms) delays write dispatch by the same amount —
-    // which can push the PLC gap to ~140 ms and trigger miss-count warnings.
-    //
-    // FIRMWARE FIX (one line in the ESP32 sketch):
-    //   BEFORE: pService->createCharacteristic(UUID, PROPERTY_WRITE)
-    //   AFTER:  pService->createCharacteristic(UUID,
-    //             PROPERTY_WRITE | PROPERTY_WRITE_NO_RESPONSE)
-    //
-    // Flutter will then automatically detect writeWithoutResponse=true here
-    // and switch to ATT WRITE COMMAND, eliminating all timing sensitivity.
+
     if (!useWithoutResponse) {
       _logger.w(
         'HB: ESP32 characteristic declares PROPERTY_WRITE only — '
@@ -717,23 +628,6 @@ class BleService {
     );
   }
 
-  /// Called on every timer tick.
-  ///
-  /// Two concerns are handled independently:
-  ///
-  /// 1. Interval measurement — recorded at the top of every tick (including
-  ///    throttled ones) using wall-clock time so the log reflects true
-  ///    Timer.periodic cadence regardless of write completion.
-  ///
-  /// 2. Dispatch throttle — time-based, NOT callback-based.  When
-  ///    Android's main thread is busy rendering, the platform-channel call
-  ///    is queued on Android's Looper and may not execute for 100+ ms.  Both
-  ///    the write itself AND its .then() callback suffer the same delay.
-  ///    Waiting for the callback (the old _hbWriteInFlight approach) causes
-  ///    3-4 consecutive ticks to skip, creating a 300-400 ms PLC gap.
-  ///    Instead, we allow a new dispatch as soon as 50 ms have elapsed since
-  ///    the previous one — well past the ~15 ms BLE round-trip, but without
-  ///    coupling to any delayed Dart callback.
   void _sendHeartbeatTick(bool useWithoutResponse) {
     if (!_heartbeatActive || _isDisposing) return;
     final char = _heartbeatChar;
@@ -752,7 +646,9 @@ class BleService {
           : '[HB] interval';
       debugPrint('$label = ${intervalMs}ms (tick #$_hbTickCount)');
       if (intervalMs > 130 || intervalMs < 70) {
-        _logger.w('HB timer interval anomaly: ${intervalMs}ms (expected ~100ms)');
+        _logger.w(
+          'HB timer interval anomaly: ${intervalMs}ms (expected ~100ms)',
+        );
       }
     }
 
@@ -761,8 +657,6 @@ class BleService {
     if (lastDispatch != null) {
       final msSince = now.difference(lastDispatch).inMilliseconds;
       if (msSince < 50) {
-        // Catch-up tick fired too soon after the last dispatch — throttle it.
-        // This keeps GATT queue depth ≤ 2 without waiting for callbacks.
         debugPrint(
           '[HB] tick #$_hbTickCount throttled (${msSince}ms since last dispatch)',
         );
@@ -798,10 +692,6 @@ class BleService {
 
   // ── Live RSSI helpers ─────────────────────────────────────────────────────
 
-  /// Starts periodic RSSI polling (every 3 s) for the active connection.
-  /// On each tick: reads RSSI from the BLE device, reconstructs
-  /// [_connectedDevice] with the fresh value, then re-emits the current
-  /// connection state so every UI consumer rebuilds with live signal strength.
   void _startRssiPolling() {
     _rssiTimer?.cancel();
     _rssiTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
@@ -822,9 +712,7 @@ class BleService {
           rssi: rssi,
           device: connectedDevice.device,
         );
-        // Re-emit the same connection status — the controller's stream listener
-        // will pick up the new connectedDevice and call notifyListeners(),
-        // propagating the fresh RSSI to all UI consumers.
+
         _emit(_snapshot.status);
       } catch (e) {
         _logger.w('RSSI poll failed: $e');
@@ -865,7 +753,6 @@ class BleService {
     _stopRssiPolling();
     _stopHeartbeat();
     _scanResultsSub?.cancel();
-    _analogSubscription?.cancel();
     _authSubscription?.cancel();
     _statusSubscription?.cancel();
     _connStateSub?.cancel();
@@ -877,7 +764,7 @@ class BleService {
     final device = _device;
     _device = null;
     _connectedDevice = null;
-    _analogChar = null;
+
     _digitalChar = null;
     _authChar = null;
     _statusChar = null;
@@ -888,7 +775,7 @@ class BleService {
 
     _connectionController.close();
     _scanController.close();
-    _analogController.close();
+
     _statusController.close();
   }
 }
