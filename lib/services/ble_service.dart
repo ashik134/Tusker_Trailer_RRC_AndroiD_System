@@ -11,6 +11,7 @@ import 'package:tusker_trailer_rrc/utils/constants.dart';
 
 import 'package:tusker_trailer_rrc/models/ble_scan_device.dart';
 import 'package:tusker_trailer_rrc/models/plc_output_command.dart';
+import 'package:tusker_trailer_rrc/services/ble_crypto.dart';
 
 enum BleConnectionStatus {
   disconnected,
@@ -73,6 +74,10 @@ class BleService {
   Completer<BleAuthOutcome>? _pendingAuthCompleter;
   Completer<void>? _pendingSafeStateCompleter;
   bool _isDisposing = false;
+
+  // True once the PLC has confirmed AUTH_OK and the session is live.
+  // Digital-characteristic writes are AES-128-GCM encrypted while this is true.
+  bool _sessionAuthenticated = false;
 
   // ── Live RSSI polling ───────────────────────────────────────────────────────
   Timer? _rssiTimer;
@@ -341,6 +346,7 @@ class BleService {
         _logger.w('Safe-state cleanup write failed during disconnect.');
       }
     }
+    _sessionAuthenticated = false; // clear before tearing down characteristics
 
     await _authSubscription?.cancel();
     await _statusSubscription?.cancel();
@@ -374,6 +380,7 @@ class BleService {
     }
     _stopRssiPolling();
     _stopHeartbeat();
+    _sessionAuthenticated = false;
     _device = null;
     _connectedDevice = null;
     _connStateSub?.cancel();
@@ -459,10 +466,11 @@ class BleService {
     if (_digitalChar == null) {
       throw StateError('Digital characteristic is not ready.');
     }
-    await _digitalChar!.write(
-      PlcOutputCommand.emergencyStop().wireBytes.toList(),
-      withoutResponse: false,
-    );
+    final plainBytes = PlcOutputCommand.emergencyStop().wireBytes.toList();
+    final wireBytes = _sessionAuthenticated
+        ? await BleCrypto.encrypt(plainBytes)
+        : plainBytes;
+    await _digitalChar!.write(wireBytes, withoutResponse: false);
   }
 
   void _handleAuthNotification(List<int> bytes) {
@@ -494,41 +502,28 @@ class BleService {
   }
 
   Future<void> _finalizeAuthenticatedSession() async {
-    _emit(
-      BleConnectionStatus.authenticating,
-      message: 'Finalizing safe-state synchronization...',
-    );
-
-    try {
-      await _sendSafeStateAndAwaitAck();
-
-      if (!kIsWeb && Platform.isAndroid) {
-        try {
-          await _device!.requestConnectionPriority(
-            connectionPriorityRequest: ConnectionPriority.high,
-          );
-          debugPrint('[BLE] Connection priority set to HIGH.');
-        } catch (e) {
-          _logger.w('Could not set connection priority: $e');
-        }
-      }
-      _emit(BleConnectionStatus.authenticated);
-      _pendingAuthCompleter?.complete(BleAuthOutcome.success);
-      _pendingAuthCompleter = null;
-      _startRssiPolling(); // Begin live RSSI updates now that the session is fully up.
-      _startHeartbeat(); // Begin 100 ms heartbeat — Timer.periodic, fire-and-forget writes.
-    } catch (error) {
-      _pendingAuthCompleter?.complete(BleAuthOutcome.failed);
-      _pendingAuthCompleter = null;
-      _emit(
-        BleConnectionStatus.error,
-        message: 'Post-auth safe-state sync failed: ${error.toString()}',
-      );
-      final device = _device;
-      if (device != null && device.isConnected) {
-        await device.disconnect();
+    // The firmware enforces "outputs OFF until authentication" internally,
+    // so no post-auth safe-state write is needed here. Sending plaintext
+    // bytes to the digital characteristic after auth causes DECRYPT FAILED
+    // on the PLC (which now expects AES-GCM encrypted commands), which
+    // previously caused the safe-state sync to time out and incorrectly
+    // report the auth as failed.
+    if (!kIsWeb && Platform.isAndroid) {
+      try {
+        await _device!.requestConnectionPriority(
+          connectionPriorityRequest: ConnectionPriority.high,
+        );
+        debugPrint('[BLE] Connection priority set to HIGH.');
+      } catch (e) {
+        _logger.w('Could not set connection priority: $e');
       }
     }
+    _sessionAuthenticated = true; // enable AES-GCM encryption for all digital-char writes
+    _emit(BleConnectionStatus.authenticated);
+    _pendingAuthCompleter?.complete(BleAuthOutcome.success);
+    _pendingAuthCompleter = null;
+    _startRssiPolling(); // Begin live RSSI updates now that the session is fully up.
+    _startHeartbeat(); // Begin 100 ms heartbeat — Timer.periodic, fire-and-forget writes.
   }
 
   Future<BleAuthOutcome> authenticate({
@@ -729,7 +724,10 @@ class BleService {
 
   Future<void> writeDigital(List<int> bytes) async {
     if (_digitalChar == null) return;
-    await _digitalChar!.write(bytes, withoutResponse: false);
+    final wireBytes = _sessionAuthenticated
+        ? await BleCrypto.encrypt(bytes)
+        : bytes;
+    await _digitalChar!.write(wireBytes, withoutResponse: false);
   }
 
   Future<void> writeAuth(List<int> bytes) async {
