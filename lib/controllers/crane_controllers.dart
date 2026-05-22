@@ -29,7 +29,7 @@ class CraneController extends ChangeNotifier {
   BleConnectionState _transportConnState = BleConnectionState.initial();
   BleConnectionStatus _lastConnectionStatus = BleConnectionStatus.disconnected;
   List<BleScanDevice> _devices = const [];
-  Map<String, int> _analogValues = {};
+  
   PlcOutputCommand _activeCommand = PlcOutputCommand.idle();
 
   // ── BLE write serializer ──────────────────────────────────────────────────
@@ -90,7 +90,7 @@ class CraneController extends ChangeNotifier {
   String? get sessionEmail => _sessionEmail;
   String? get errorMessage => _errorMessage ?? _transportConnState.message;
   List<BleScanDevice> get devices => _devices;
-  Map<String, int> get analogValues => _analogValues;
+ 
   String get savedEmail => _savedEmail;
   String get savedPassword => _savedPassword;
   BleConnectionState get connectionState => _transportConnState;
@@ -110,9 +110,8 @@ class CraneController extends ChangeNotifier {
   bool get isAwaitingAuthentication =>
       _transportConnState.status == BleConnectionStatus.awaitingAuthentication;
 
-  // ── Analog sensor values ────────────────────────────────────────────────
-  int get a1 => _analogValues['A1'] ?? 0;
-  int get a2 => _analogValues['A2'] ?? 0;
+  
+  
 
   // ── LED indicator states ─────────────────────────────────────────────────
   // Emergency indicator must represent the active lockout condition only.
@@ -373,10 +372,10 @@ class CraneController extends ChangeNotifier {
       notifyListeners();
     });
 
-    _analogSubscription = _bleService.analogStream.listen((values) {
-      _analogValues = values;
-      notifyListeners();
-    });
+    // _analogSubscription = _bleService.analogStream.listen((values) {
+    //   _analogValues = values;
+    //   notifyListeners();
+    // });
 
     _statusSubscription = _bleService.statusStream.listen((command) {
       _activeCommand = command;
