@@ -36,7 +36,7 @@ class CraneController extends ChangeNotifier {
   // Prevents BLE queue flooding when commands arrive faster than writes complete.
   // Only one write is in flight at a time; the latest pending command wins.
   bool _commandInFlight = false;
-  List<int>? _pendingCommandBytes;
+  PlcOutputCommand? _pendingCommand;
 
   bool _initializing = true;
   Future<void>? _initializeFuture;
@@ -518,29 +518,28 @@ class CraneController extends ChangeNotifier {
   Future<void> _sendCommand(PlcOutputCommand command) async {
     _activeCommand = command;
     notifyListeners();
-    final bytes = command.wireBytes.toList();
     if (_commandInFlight) {
       // Replace whatever was pending — latest command wins.
-      _pendingCommandBytes = bytes;
+      _pendingCommand = command;
       return;
     }
-    await _writeBytes(bytes);
+    await _writeCommand(command);
   }
 
-  Future<void> _writeBytes(List<int> bytes) async {
+  Future<void> _writeCommand(PlcOutputCommand command) async {
     _commandInFlight = true;
     try {
-      await _bleService.writeDigital(bytes);
+      await _bleService.writeEncryptedControl(command);
       // Drain at most one pending command queued while this write was in flight.
-      final next = _pendingCommandBytes;
-      _pendingCommandBytes = null;
+      final next = _pendingCommand;
+      _pendingCommand = null;
       if (next != null) {
         _commandInFlight = false;
-        await _writeBytes(next);
+        await _writeCommand(next);
         return;
       }
     } catch (e) {
-      _pendingCommandBytes = null;
+      _pendingCommand = null;
       _errorMessage = 'Failed to send command: ${e.toString()}';
       notifyListeners();
     }
@@ -554,16 +553,15 @@ class CraneController extends ChangeNotifier {
     final cmd = PlcOutputCommand.emergencyStop();
     _activeCommand = cmd;
     notifyListeners();
-    final bytes = cmd.wireBytes.toList();
     // E-stop bypasses the serializer: preempts any pending command and sends
     // immediately after the current in-flight write (or right now if idle).
-    _pendingCommandBytes = bytes;
+    _pendingCommand = cmd;
     if (!_commandInFlight) {
-      final pending = _pendingCommandBytes!;
-      _pendingCommandBytes = null;
-      await _writeBytes(pending);
+      final pending = _pendingCommand!;
+      _pendingCommand = null;
+      await _writeCommand(pending);
     }
-    // If a write is in flight it will drain _pendingCommandBytes next,
+    // If a write is in flight it will drain _pendingCommand next,
     // ensuring the E-stop is the very next thing written.
   }
 
@@ -578,9 +576,9 @@ class CraneController extends ChangeNotifier {
     _clearDirectionalHolds(notify: false);
     _activeCommand = PlcOutputCommand.emergencyStop();
     // Discard any queued motion command so it cannot race the safe-state write.
-    _pendingCommandBytes = null;
+    _pendingCommand = null;
     notifyListeners();
-    // BleService.disconnect() writes emergencyStop wireBytes before tearing
+    // BleService.disconnect() writes an encrypted emergencyStop before tearing
     // down the BLE link, giving the PLC one last chance to enter safe state.
     await _bleService.disconnect();
   }

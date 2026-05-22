@@ -11,6 +11,9 @@ import 'package:tusker_trailer_rrc/utils/constants.dart';
 
 import 'package:tusker_trailer_rrc/models/ble_scan_device.dart';
 import 'package:tusker_trailer_rrc/models/plc_output_command.dart';
+import 'package:tusker_trailer_rrc/security/crypto_service.dart';
+import 'package:tusker_trailer_rrc/security/secure_packet.dart';
+import 'package:tusker_trailer_rrc/security/session_manager.dart';
 
 enum BleConnectionStatus {
   disconnected,
@@ -226,6 +229,18 @@ class BleService {
   // Discover services and map characteristics.
   Future<void> _discoverServices() async {
     try {
+      // Request the maximum MTU to accommodate encrypted packet payloads.
+      // Encrypted control = 46 bytes, heartbeat = 45 bytes — well above the
+      // BLE 4.x default of 23 bytes (20 usable).
+      if (!kIsWeb && Platform.isAndroid) {
+        try {
+          final mtu = await _device!.requestMtu(SecurityConstants.requiredMtu);
+          _logger.i('[BLE] MTU negotiated: $mtu bytes');
+        } catch (e) {
+          _logger.w('[BLE] MTU negotiation failed — proceeding with default: $e');
+        }
+      }
+
       final services = await _device!.discoverServices();
 
       BluetoothCharacteristic? digital;
@@ -323,6 +338,9 @@ class BleService {
   Future<void> disconnect({bool emitState = true}) async {
     _stopRssiPolling(); // Stop polling before tearing down the BLE link.
     _stopHeartbeat(); // Stop heartbeat before tearing down the BLE link.
+    // Terminate the cryptographic session immediately — prevents any in-flight
+    // encrypted write from using stale session credentials.
+    SessionManager.instance.endSession();
     _pendingAuthCompleter?.complete(BleAuthOutcome.failed);
     _pendingAuthCompleter = null;
     final pendingSafeState = _pendingSafeStateCompleter;
@@ -374,6 +392,9 @@ class BleService {
     }
     _stopRssiPolling();
     _stopHeartbeat();
+    // Terminate the cryptographic session — all encrypted write operations
+    // are blocked until a new authenticated session is established.
+    SessionManager.instance.endSession();
     _device = null;
     _connectedDevice = null;
     _connStateSub?.cancel();
@@ -456,13 +477,33 @@ class BleService {
   }
 
   Future<void> _sendSafeStateCommand() async {
-    if (_digitalChar == null) {
+    final char = _digitalChar;
+    if (char == null) {
       throw StateError('Digital characteristic is not ready.');
     }
-    await _digitalChar!.write(
-      PlcOutputCommand.emergencyStop().wireBytes.toList(),
-      withoutResponse: false,
-    );
+    final cmd = PlcOutputCommand.emergencyStop();
+
+    // Use encrypted writes when a session is active (post-authentication).
+    // This ensures the PLC's GCM authentication rejects any spoofed plain-text
+    // safe-state commands injected by an attacker on the radio link.
+    if (CryptoService.instance.isInitialized &&
+        SessionManager.instance.isSessionActive) {
+      try {
+        final packet = await SecurePacketEncoder.instance.encodeControl(cmd);
+        await char.write(packet.toList(), withoutResponse: false);
+        return;
+      } catch (e) {
+        _logger.w(
+          '[BLE] Encrypted safe-state write failed; '
+          'falling back to plain-text E-stop: $e',
+        );
+      }
+    }
+
+    // Plain-text fallback: pre-authentication or encryption unavailable.
+    // An un-authenticated plain E-stop is still accepted by the PLC because
+    // the safe state (all outputs off) is the safest possible outcome.
+    await char.write(cmd.wireBytes.toList(), withoutResponse: false);
   }
 
   void _handleAuthNotification(List<int> bytes) {
@@ -483,6 +524,9 @@ class BleService {
 
     if (payload == BLEConstants.authFailed ||
         payload == BLEConstants.authTimeout) {
+      // Authentication rejected — tear down the cryptographic session so no
+      // further encrypted writes are possible with this session ID.
+      SessionManager.instance.endSession();
       _pendingAuthCompleter?.complete(
         payload == BLEConstants.authTimeout
             ? BleAuthOutcome.timedOut
@@ -545,16 +589,41 @@ class BleService {
     final authFuture = _pendingAuthCompleter!.future;
     _emit(BleConnectionStatus.authenticating);
 
-    await _authChar!.write(
-      utf8.encode('$email|$password'),
-      withoutResponse: false,
-    );
+    // Begin the cryptographic session BEFORE encoding the auth packet.
+    // The randomly generated session_id is embedded in the encrypted payload
+    // so the PLC can bind every subsequent packet to this authenticated session.
+    SessionManager.instance.beginSession();
+
+    try {
+      final Uint8List authPacket;
+      if (CryptoService.instance.isInitialized) {
+        authPacket = await SecurePacketEncoder.instance.encodeAuth(
+          email: email,
+          password: password,
+        );
+      } else {
+        // Fallback for development when crypto is not initialized.
+        _logger.w('[BLE] authenticate: CryptoService not initialized — sending plain auth.');
+        authPacket = Uint8List.fromList(utf8.encode('$email|$password'));
+      }
+      await _authChar!.write(authPacket.toList(), withoutResponse: false);
+    } catch (e) {
+      SessionManager.instance.endSession();
+      _pendingAuthCompleter?.complete(BleAuthOutcome.failed);
+      _pendingAuthCompleter = null;
+      _emit(
+        BleConnectionStatus.awaitingAuthentication,
+        message: 'Auth request encoding failed.',
+      );
+      return BleAuthOutcome.failed;
+    }
 
     try {
       return await authFuture.timeout(
         SafetyConstants.authReplyTimeout,
         onTimeout: () {
           _pendingAuthCompleter = null;
+          SessionManager.instance.endSession();
           _emit(
             BleConnectionStatus.awaitingAuthentication,
             message: 'PLC authentication timed out.',
@@ -664,22 +733,25 @@ class BleService {
       }
     }
 
-    // ── Dispatch ───────────────────────────────────────────────────────────
+    // ── Dispatch encrypted heartbeat ───────────────────────────────────────
     _hbLastDispatchTime = now;
     _hbDispatchCount++;
     if (_hbDispatchCount <= 5 || _hbDispatchCount % 10 == 0) {
-      debugPrint('[HB] HB dispatched (#$_hbDispatchCount)');
+      debugPrint('[HB] encrypted HB dispatched (#$_hbDispatchCount)');
     }
 
-    char
-        .write(
-          utf8.encode(BLEConstants.heartbeatPayload),
-          withoutResponse: useWithoutResponse,
-        )
-        .catchError((Object e) {
-          _logger.w('Heartbeat write failed: $e');
-          debugPrint('[HB] write error: $e');
-        });
+    SecurePacketEncoder.instance.encodeHeartbeat().then((packet) {
+      if (!_heartbeatActive || _isDisposing) return;
+      char
+          .write(packet.toList(), withoutResponse: useWithoutResponse)
+          .catchError((Object e) {
+            _logger.w('Encrypted heartbeat write failed: $e');
+            debugPrint('[HB] encrypted write error: $e');
+          });
+    }).catchError((Object e) {
+      _logger.w('Heartbeat packet encryption failed: $e');
+      debugPrint('[HB] encryption error: $e');
+    });
   }
 
   void _stopHeartbeat() {
@@ -727,9 +799,24 @@ class BleService {
 
   // ── Write helpers ──────────────────────────────────────────────────────────
 
-  Future<void> writeDigital(List<int> bytes) async {
-    if (_digitalChar == null) return;
-    await _digitalChar!.write(bytes, withoutResponse: false);
+  /// Encrypt [command] and write it to the digital output characteristic.
+  ///
+  /// Throws [StateError] if [CryptoService] is not initialized.
+  /// Throws if the BLE write fails (caller handles retry / safe-state).
+  Future<void> writeEncryptedControl(PlcOutputCommand command) async {
+    final char = _digitalChar;
+    if (char == null) return;
+
+    if (!CryptoService.instance.isInitialized) {
+      const msg =
+          '[BLE] writeEncryptedControl: CryptoService not initialized. '
+          'Refusing to send unencrypted control command.';
+      _logger.e(msg);
+      throw StateError(msg);
+    }
+
+    final packet = await SecurePacketEncoder.instance.encodeControl(command);
+    await char.write(packet.toList(), withoutResponse: false);
   }
 
   Future<void> writeAuth(List<int> bytes) async {

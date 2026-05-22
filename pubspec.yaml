@@ -42,6 +42,9 @@ dependencies:
   logger: ^2.7.0
   vibration: ^3.1.8
   flutter_launcher_icons: ^0.14.4
+  # ── Secure BLE communication layer ─────────────────────────────────────────
+  cryptography: ^2.7.0                # AES-128-GCM encryption (pure Dart)
+  flutter_secure_storage: ^10.2.0    # Android Keystore / iOS Keychain key storage
   
 
 dev_dependencies:

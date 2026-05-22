@@ -1,5 +1,32 @@
 import 'package:flutter/material.dart';
 
+/// (crypto_config.h) to ensure packet compatibility.
+/// 
+class SecurityConstants {
+  
+  static const int ivLength = 12;
+
+  // AES-GCM authentication tag length (bytes).
+  static const int tagLength = 16;
+
+  // AES-128 key length (bytes).
+  static const int keyLength = 16;
+
+  // Plaintext header length shared by all packet types (bytes).
+  //   1 (type) + 8 (timestamp) + 4 (seq) + 4 (session_id) = 17
+  static const int packetHeaderLength = 17;
+
+  // Maximum acceptable age of an inbound packet for replay protection.
+  static const Duration maxPacketAge = Duration(seconds: 30);
+
+  // Number of inbound sequence numbers tracked in the rolling replay window.
+  static const int replayWindowSize = 64;
+
+  // Minimum BLE MTU required to carry the largest encrypted packet.
+  // Encrypted control packet = 46 bytes; request 512 to leave headroom.
+  static const int requiredMtu = 512;
+}
+
 class AppConstants {
   static const String plcName = 'PLC 14';
   static const String appTitle = 'Tusker Hauler RRC';
