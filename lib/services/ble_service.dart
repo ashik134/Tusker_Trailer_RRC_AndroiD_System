@@ -670,15 +670,38 @@ class BleService {
       debugPrint('[HB] HB dispatched (#$_hbDispatchCount)');
     }
 
-    char
-        .write(
-          utf8.encode(BLEConstants.heartbeatPayload),
-          withoutResponse: useWithoutResponse,
-        )
-        .catchError((Object e) {
-          _logger.w('Heartbeat write failed: $e');
-          debugPrint('[HB] write error: $e');
-        });
+    // Encrypt through the shared AES-GCM pipeline so the global packet
+    // counter advances for every heartbeat tick, not only for control writes.
+    // The firmware uses the monotonically increasing counter across ALL
+    // characteristics to detect replay attacks and stale packets.
+    //
+    // BleCrypto._buildNonce() increments the counter *synchronously* before
+    // the first await, so a concurrent control write and a heartbeat tick
+    // dispatched in the same event-loop turn still receive distinct IVs.
+    _encryptAndSendHeartbeat(char, useWithoutResponse).catchError((Object e) {
+      _logger.w('Heartbeat write failed: $e');
+      debugPrint('[HB] write error: $e');
+    });
+  }
+
+  /// Encrypts the heartbeat payload and writes it to [char].
+  ///
+  /// Re-checks [_heartbeatActive] and [_isDisposing] after the async gap so
+  /// a write is never attempted after disconnect or dispose has begun.
+  /// Any [StateError] from [BleCrypto.encrypt] (session ended mid-flight) is
+  /// caught by the [.catchError] at the call site in [_sendHeartbeatTick].
+  Future<void> _encryptAndSendHeartbeat(
+    BluetoothCharacteristic char,
+    bool useWithoutResponse,
+  ) async {
+    final plainBytes = utf8.encode(BLEConstants.heartbeatPayload);
+    final wireBytes = _sessionAuthenticated
+        ? await BleCrypto.encrypt(plainBytes)
+        : plainBytes;
+    // Re-check after the async gap: disconnect may have occurred while the
+    // AES-GCM operation was in flight.
+    if (!_heartbeatActive || _isDisposing) return;
+    await char.write(wireBytes, withoutResponse: useWithoutResponse);
   }
 
   void _stopHeartbeat() {
