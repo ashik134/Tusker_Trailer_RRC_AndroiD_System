@@ -475,15 +475,67 @@ class BleService {
   }
 
   void _handleAuthNotification(List<int> bytes) {
-    final payload = utf8.decode(bytes).trim();
-    _logger.i('Auth notification: $payload');
-
-    if (payload == BLEConstants.authRequest) {
-      if (_snapshot.status != BleConnectionStatus.authenticated) {
-        _emit(BleConnectionStatus.awaitingAuthentication);
+    // Pre-session: only the plaintext AUTH_REQ prompt from the PLC is expected
+    // here.  All actual auth responses (AUTH_OK / AUTH_FAIL) are encrypted.
+    if (!BleCrypto.sessionActive) {
+      final payload = _tryDecodeUtf8(bytes)?.trim();
+      if (payload == BLEConstants.authRequest) {
+        if (_snapshot.status != BleConnectionStatus.authenticated) {
+          _emit(BleConnectionStatus.awaitingAuthentication);
+        }
+        return;
       }
+      // Any other plaintext before a session is established is unexpected.
+      _logger.w(
+        'Auth notification before session active '
+        '(ignored): ${payload ?? "<binary>"}',
+      );
       return;
     }
+
+    // Active session: every notification MUST be AES-GCM encrypted.
+    // Fire-and-forget the async decryption — errors are handled inside.
+    _decryptAndHandleAuthNotification(bytes);
+  }
+
+  /// Decrypts an inbound auth-characteristic notification and drives the
+  /// authentication state machine.
+  ///
+  /// Separated from [_handleAuthNotification] so the notification callback
+  /// (synchronous BLE thread) can return immediately while decryption and
+  /// validation run on the event loop.
+  ///
+  /// On ANY cryptographic failure this method calls [_enterCryptoSafeState],
+  /// which stops all outputs, ends the session, and forces re-authentication.
+  Future<void> _decryptAndHandleAuthNotification(List<int> bytes) async {
+    if (_isDisposing) return;
+
+    final List<int> plaintext;
+    try {
+      plaintext = await BleCrypto.decrypt(bytes);
+    } on BleCryptoException catch (e) {
+      _logger.e('Auth notification decryption failed: $e');
+      debugPrint('[SECURITY] BleCryptoException on auth notify: ${e.reason}');
+      await _enterCryptoSafeState('Auth decryption failed: ${e.reason}');
+      return;
+    } on StateError catch (e) {
+      _logger.e('Auth notify outside active session: $e');
+      await _enterCryptoSafeState('Auth notification outside session: $e');
+      return;
+    } catch (e) {
+      _logger.e('Unexpected error decrypting auth notification: $e');
+      await _enterCryptoSafeState('Unexpected decryption error: $e');
+      return;
+    }
+
+    final payload = _tryDecodeUtf8(plaintext)?.trim();
+    if (payload == null) {
+      _logger.e('Decrypted auth payload is not valid UTF-8.');
+      await _enterCryptoSafeState('Decrypted auth payload is not valid UTF-8.');
+      return;
+    }
+
+    _logger.i('Auth notification (decrypted): $payload');
 
     if (payload == BLEConstants.authSuccess) {
       _finalizeAuthenticatedSession();
@@ -492,6 +544,8 @@ class BleService {
 
     if (payload == BLEConstants.authFailed ||
         payload == BLEConstants.authTimeout) {
+      // Auth was rejected by the PLC — the session does not go live.
+      BleCrypto.endSession();
       _pendingAuthCompleter?.complete(
         payload == BLEConstants.authTimeout
             ? BleAuthOutcome.timedOut
@@ -499,16 +553,70 @@ class BleService {
       );
       _pendingAuthCompleter = null;
       _emit(BleConnectionStatus.error, message: payload);
+      return;
+    }
+
+    // Unknown payload — treat as a security anomaly and enter safe state.
+    _logger.e('Unknown decrypted auth payload: "$payload"');
+    await _enterCryptoSafeState('Unknown auth response payload: "$payload"');
+  }
+
+  /// Attempts to decode [bytes] as UTF-8.  Returns [null] on failure rather
+  /// than throwing, so callers can handle malformed payloads safely.
+  String? _tryDecodeUtf8(List<int> bytes) {
+    try {
+      return utf8.decode(bytes);
+    } catch (_) {
+      return null;
     }
   }
 
+  /// Immediately enters safe state after a cryptographic validation failure.
+  ///
+  /// This is triggered whenever decryption, tag verification, session
+  /// validation, counter validation, or replay detection fails on an inbound
+  /// BLE packet.
+  ///
+  /// Because this system controls safety-critical crane/trailer hardware,
+  /// ANY cryptographic failure MUST:
+  ///   1. Stop all active output loops (heartbeat).
+  ///   2. Terminate the encrypted session.
+  ///   3. Fail any pending authentication.
+  ///   4. Emit an error state visible to the UI.
+  ///   5. Disconnect the BLE session and require re-authentication.
+  Future<void> _enterCryptoSafeState(String reason) async {
+    if (_isDisposing) return;
+
+    _logger.e('CRYPTO SAFE STATE ENTERED: $reason');
+    debugPrint('[SECURITY] Entering crypto safe state — reason: $reason');
+
+    // 1. Stop all active output loops immediately.
+    _stopHeartbeat();
+
+    // 2. Clear the authenticated session — no further encrypted writes allowed.
+    _sessionAuthenticated = false;
+    BleCrypto.endSession();
+
+    // 3. Fail any pending authentication future.
+    _pendingAuthCompleter?.complete(BleAuthOutcome.failed);
+    _pendingAuthCompleter = null;
+
+    // 4. Surface the security error to the UI.
+    _emit(
+      BleConnectionStatus.error,
+      message: 'Security error — session terminated. Please reconnect.',
+    );
+
+    // 5. Disconnect.  disconnect(emitState: false) preserves our error state
+    //    above and attempts a best-effort plaintext safe-state write before
+    //    tearing down the BLE link.
+    await disconnect(emitState: false);
+  }
+
   Future<void> _finalizeAuthenticatedSession() async {
-    // The firmware enforces "outputs OFF until authentication" internally,
-    // so no post-auth safe-state write is needed here. Sending plaintext
-    // bytes to the digital characteristic after auth causes DECRYPT FAILED
-    // on the PLC (which now expects AES-GCM encrypted commands), which
-    // previously caused the safe-state sync to time out and incorrectly
-    // report the auth as failed.
+    // Session was already established in authenticate() via
+    // BleCrypto.beginSession() — do NOT call beginSession() again here.
+    // The session ID and packet counter are already live.
     if (!kIsWeb && Platform.isAndroid) {
       try {
         await _device!.requestConnectionPriority(
@@ -519,10 +627,9 @@ class BleService {
         _logger.w('Could not set connection priority: $e');
       }
     }
-    // Establish a new cryptographic session: persists and increments the
-    // session counter so the deterministic IV is unique across reconnects.
-    await BleCrypto.beginSession();
-    _sessionAuthenticated = true; // enable AES-GCM encryption for all digital-char writes
+    // Session and session counter were already persisted in authenticate().
+    // Mark the session live and start ancillary loops.
+    _sessionAuthenticated = true; // enable AES-GCM encryption for digital-char writes
     _emit(BleConnectionStatus.authenticated);
     _pendingAuthCompleter?.complete(BleAuthOutcome.success);
     _pendingAuthCompleter = null;
@@ -544,15 +651,31 @@ class BleService {
     final authFuture = _pendingAuthCompleter!.future;
     _emit(BleConnectionStatus.authenticating);
 
-    await _authChar!.write(
-      utf8.encode('$email|$password'),
-      withoutResponse: false,
-    );
+    // Establish a new encrypted session BEFORE sending credentials.
+    //
+    // beginSession() increments and persists the monotonic session counter so
+    // the 12-byte nonce [session_id || packet_counter] is unique across every
+    // reconnect, even after crashes or forced restarts.
+    //
+    // The PLC extracts the session ID from the nonce of this first packet and
+    // uses it for all subsequent response nonces — no separate handshake needed.
+    //
+    // endSession() first clears any state from a previous failed attempt so a
+    // retry always starts from a clean baseline.
+    BleCrypto.endSession();
+    await BleCrypto.beginSession();
+
+    final plaintext = utf8.encode('$email|$password');
+    final wireBytes = await BleCrypto.encrypt(plaintext);
+
+    await _authChar!.write(wireBytes, withoutResponse: false);
 
     try {
       return await authFuture.timeout(
         SafetyConstants.authReplyTimeout,
         onTimeout: () {
+          // Clean up the session on timeout — AUTH_OK was never received.
+          BleCrypto.endSession();
           _pendingAuthCompleter = null;
           _emit(
             BleConnectionStatus.awaitingAuthentication,
