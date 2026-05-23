@@ -381,6 +381,7 @@ class BleService {
     _stopRssiPolling();
     _stopHeartbeat();
     _sessionAuthenticated = false;
+    BleCrypto.endSession(); // clear in-memory IV state; persisted counter stays as watermark
     _device = null;
     _connectedDevice = null;
     _connStateSub?.cancel();
@@ -518,6 +519,9 @@ class BleService {
         _logger.w('Could not set connection priority: $e');
       }
     }
+    // Establish a new cryptographic session: persists and increments the
+    // session counter so the deterministic IV is unique across reconnects.
+    await BleCrypto.beginSession();
     _sessionAuthenticated = true; // enable AES-GCM encryption for all digital-char writes
     _emit(BleConnectionStatus.authenticated);
     _pendingAuthCompleter?.complete(BleAuthOutcome.success);
