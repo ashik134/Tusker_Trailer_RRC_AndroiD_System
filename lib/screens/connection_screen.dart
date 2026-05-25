@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import 'package:tusker_trailer_rrc/controllers/crane_controllers.dart';
 import 'package:tusker_trailer_rrc/models/ble_scan_device.dart';
+import 'package:tusker_trailer_rrc/screens/settings_screen.dart';
 import 'package:tusker_trailer_rrc/services/ble_service.dart';
 import 'package:tusker_trailer_rrc/utils/constants.dart';
 
@@ -107,6 +108,19 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Device Settings',
+            icon: const Icon(
+              Icons.settings_rounded,
+              color: ConnectionColors.primary,
+              size: 22,
+            ),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const SettingsScreen(),
+              ),
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 16),
             child: Container(

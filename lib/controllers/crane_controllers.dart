@@ -8,6 +8,7 @@ import 'package:tusker_trailer_rrc/services/ble_service.dart';
 import 'package:tusker_trailer_rrc/services/biometric_service.dart';
 import 'package:tusker_trailer_rrc/services/secure_credential_store.dart';
 import 'package:tusker_trailer_rrc/services/permission_service.dart';
+import 'package:tusker_trailer_rrc/services/device_identity_service.dart';
 import 'package:tusker_trailer_rrc/utils/constants.dart';
 import 'package:tusker_trailer_rrc/utils/preferences.dart';
 
@@ -59,6 +60,10 @@ class CraneController extends ChangeNotifier {
   String? _errorMessage;
   String _savedEmail = '';
   String _savedPassword = '';
+  String _deviceId = '';
+  // True when the last auth attempt was rejected because this device is not
+  // in the PLC trusted-device registry. Used to show a targeted UI message.
+  bool _deviceTrustRejected = false;
   final Set<HoistDirection> _activeDirectionalHolds = <HoistDirection>{};
   HoistDirection? _verticalDirectionLock;
   HoistDirection? _horizontalDirectionLock;
@@ -124,6 +129,14 @@ class CraneController extends ChangeNotifier {
       _transportConnState.status == BleConnectionStatus.authenticated;
   bool get isAwaitingAuthentication =>
       _transportConnState.status == BleConnectionStatus.awaitingAuthentication;
+
+  /// The unique permanent identity of this app installation, loaded at startup.
+  /// Included in every authentication payload for PLC trusted-device validation.
+  String get deviceId => _deviceId;
+
+  /// True when the last authentication attempt was rejected because this
+  /// device is not registered in the PLC trusted-device list.
+  bool get isDeviceTrustRejected => _deviceTrustRejected;
 
   
   
@@ -340,12 +353,15 @@ class CraneController extends ChangeNotifier {
     _attachStreamsIfNeeded();
 
     try {
-      final values = await Future.wait<String?>([
+      // Load device identity and saved credentials concurrently.
+      final results = await Future.wait<dynamic>([
+        DeviceIdentityService.getOrCreate(),
         _preferences.getEmail(),
         _preferences.getPassword(),
       ]);
-      _savedEmail = values[0] ?? '';
-      _savedPassword = values[1] ?? '';
+      _deviceId = results[0] as String;
+      _savedEmail = (results[1] as String?) ?? '';
+      _savedPassword = (results[2] as String?) ?? '';
       _rememberCredentials =
           _savedEmail.isNotEmpty && _savedPassword.isNotEmpty;
 
@@ -380,6 +396,7 @@ class CraneController extends ChangeNotifier {
         _startupEmergencyArmedForConnection = false;
         _sessionEmail = null;
         _pendingEnrollmentOffer = false; // Clean up any stale offer state.
+        _deviceTrustRejected = false;
       } else if (snapshot.status == BleConnectionStatus.authenticated &&
           previousStatus != BleConnectionStatus.authenticated) {
         unawaited(ensureControlEntryEmergencyLock());
@@ -768,11 +785,18 @@ class CraneController extends ChangeNotifier {
     required String password,
   }) async {
     _errorMessage = null;
+    _deviceTrustRejected = false;
+
+    // Ensure device identity is available (getOrCreate is idempotent).
+    if (_deviceId.isEmpty) {
+      _deviceId = await DeviceIdentityService.getOrCreate();
+    }
 
     try {
       final outcome = await _bleService.authenticate(
         email: email.trim(),
         password: password,
+        deviceId: _deviceId,
       );
 
       if (outcome == BleAuthOutcome.success) {
@@ -788,6 +812,15 @@ class CraneController extends ChangeNotifier {
         }
         notifyListeners();
         return true;
+      }
+
+      if (outcome == BleAuthOutcome.untrusted) {
+        _deviceTrustRejected = true;
+        _errorMessage =
+            'DEVICE NOT AUTHORIZED\nThis device is not registered with PLC 14. '
+            'Provide your Device ID to an administrator for registration.';
+        notifyListeners();
+        return false;
       }
 
       _errorMessage = outcome == BleAuthOutcome.timedOut

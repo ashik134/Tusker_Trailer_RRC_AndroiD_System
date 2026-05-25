@@ -20,10 +20,11 @@ class BLEConstants {
   static const String deviceName = 'RRC_PLC';
   static const String scanNamePrefix = 'RRC_';
 
-  static const String authRequest = 'AUTH_REQ:email|password';
+  static const String authRequest = 'AUTH_REQ:email|password|device_id';
   static const String authSuccess = 'AUTH_OK';
   static const String authFailed = 'AUTH_FAIL';
   static const String authTimeout = 'AUTH_TIMEOUT';
+  static const String authUntrusted = 'AUTH_UNTRUSTED';
 
   static const String heartbeatPayload = 'HB';
 }

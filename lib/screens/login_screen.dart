@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:tusker_trailer_rrc/utils/constants.dart';
+import 'package:tusker_trailer_rrc/screens/settings_screen.dart';
 import 'package:tusker_trailer_rrc/services/ble_service.dart';
 import 'package:tusker_trailer_rrc/services/biometric_service.dart';
 import 'package:tusker_trailer_rrc/controllers/crane_controllers.dart';
@@ -695,6 +696,20 @@ class _LoginScreenState extends State<LoginScreen>
     final raw = message.trim();
     final normalized = raw.toLowerCase();
 
+    if (raw == BLEConstants.authUntrusted ||
+        normalized.contains('device not authorized') ||
+        normalized.contains('not registered')) {
+      return const _AuthErrorState(
+        title: 'Device Not Authorized',
+        message:
+            'This device is not in the PLC trusted-device registry. '
+            'Open Device Settings to copy your Device ID and provide it '
+            'to your system administrator for registration.',
+        icon: Icons.block_rounded,
+        isTrustRejection: true,
+      );
+    }
+
     if (raw == BLEConstants.authFailed ||
         normalized.contains('credentials were rejected')) {
       return const _AuthErrorState(
@@ -1279,11 +1294,16 @@ class _AuthErrorState {
     required this.title,
     required this.message,
     required this.icon,
+    this.isTrustRejection = false,
   });
 
   final String title;
   final String message;
   final IconData icon;
+  // True when the PLC rejected auth specifically because this device is not
+  // in the trusted-device registry (AUTH_UNTRUSTED). Triggers the
+  // "Open Device Settings" shortcut button in the error card.
+  final bool isTrustRejection;
 }
 
 class _AuthErrorCard extends StatelessWidget {
@@ -1331,12 +1351,43 @@ class _AuthErrorCard extends StatelessWidget {
               height: 1.3,
             ),
           ),
-          if (onRetry != null || onBackToScan != null) ...[
+          if (onRetry != null ||
+              onBackToScan != null ||
+              state.isTrustRejection) ...[
             const SizedBox(height: 10),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
+                if (state.isTrustRejection)
+                  OutlinedButton.icon(
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const SettingsScreen(),
+                      ),
+                    ),
+                    icon: const Icon(
+                      Icons.settings_rounded,
+                      size: 14,
+                    ),
+                    label: const Text('Open Device Settings'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: ConnectionColors.error,
+                      side: const BorderSide(
+                        color: ConnectionColors.errorBorder,
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      textStyle: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      minimumSize: Size.zero,
+                    ),
+                  ),
                 if (onRetry != null)
                   FilledButton.icon(
                     onPressed: onRetry,

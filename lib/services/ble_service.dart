@@ -24,7 +24,7 @@ enum BleConnectionStatus {
   error,
 }
 
-enum BleAuthOutcome { success, failed, timedOut }
+enum BleAuthOutcome { success, failed, timedOut, untrusted }
 
 class BleConnectionState {
   const BleConnectionState({
@@ -475,77 +475,49 @@ class BleService {
   }
 
   void _handleAuthNotification(List<int> bytes) {
-    // Pre-session: only the plaintext AUTH_REQ prompt from the PLC is expected
-    // here.  All actual auth responses (AUTH_OK / AUTH_FAIL) are encrypted.
-    if (!BleCrypto.sessionActive) {
-      final payload = _tryDecodeUtf8(bytes)?.trim();
-      if (payload == BLEConstants.authRequest) {
-        if (_snapshot.status != BleConnectionStatus.authenticated) {
-          _emit(BleConnectionStatus.awaitingAuthentication);
-        }
-        return;
-      }
-      // Any other plaintext before a session is established is unexpected.
+    // ALL auth-characteristic notifications from the ESP32 firmware are
+    // plain-text UTF-8 strings — no AES-GCM encryption on this channel.
+    //
+    //   PLC → app:  "AUTH_REQ:email|password|device_id" (on connect)
+    //               "AUTH_OK"      (credentials + device ID accepted)
+    //               "AUTH_FAIL"    (credentials or device ID rejected)
+    //               "AUTH_TIMEOUT" (30-second inactivity window expired)
+    //               "AUTH_UNTRUSTED" (future: device not in trusted list)
+    //
+    // The AES-128-GCM session for digital-characteristic writes is started
+    // inside _finalizeAuthenticatedSession() after AUTH_OK is confirmed.
+    final payload = _tryDecodeUtf8(bytes)?.trim();
+    if (payload == null) {
       _logger.w(
-        'Auth notification before session active '
-        '(ignored): ${payload ?? "<binary>"}',
+        'Auth notification: non-UTF8 data (${bytes.length} bytes) ignored.',
       );
       return;
     }
 
-    // Active session: every notification MUST be AES-GCM encrypted.
-    // Fire-and-forget the async decryption — errors are handled inside.
-    _decryptAndHandleAuthNotification(bytes);
-  }
+    _logger.i('Auth notification: $payload');
 
-  /// Decrypts an inbound auth-characteristic notification and drives the
-  /// authentication state machine.
-  ///
-  /// Separated from [_handleAuthNotification] so the notification callback
-  /// (synchronous BLE thread) can return immediately while decryption and
-  /// validation run on the event loop.
-  ///
-  /// On ANY cryptographic failure this method calls [_enterCryptoSafeState],
-  /// which stops all outputs, ends the session, and forces re-authentication.
-  Future<void> _decryptAndHandleAuthNotification(List<int> bytes) async {
-    if (_isDisposing) return;
-
-    final List<int> plaintext;
-    try {
-      plaintext = await BleCrypto.decrypt(bytes);
-    } on BleCryptoException catch (e) {
-      _logger.e('Auth notification decryption failed: $e');
-      debugPrint('[SECURITY] BleCryptoException on auth notify: ${e.reason}');
-      await _enterCryptoSafeState('Auth decryption failed: ${e.reason}');
-      return;
-    } on StateError catch (e) {
-      _logger.e('Auth notify outside active session: $e');
-      await _enterCryptoSafeState('Auth notification outside session: $e');
-      return;
-    } catch (e) {
-      _logger.e('Unexpected error decrypting auth notification: $e');
-      await _enterCryptoSafeState('Unexpected decryption error: $e');
+    if (payload == BLEConstants.authRequest) {
+      if (_snapshot.status != BleConnectionStatus.authenticated) {
+        _emit(BleConnectionStatus.awaitingAuthentication);
+      }
       return;
     }
-
-    final payload = _tryDecodeUtf8(plaintext)?.trim();
-    if (payload == null) {
-      _logger.e('Decrypted auth payload is not valid UTF-8.');
-      await _enterCryptoSafeState('Decrypted auth payload is not valid UTF-8.');
-      return;
-    }
-
-    _logger.i('Auth notification (decrypted): $payload');
 
     if (payload == BLEConstants.authSuccess) {
+      // Fire-and-forget: starts AES-GCM session then emits authenticated state.
       _finalizeAuthenticatedSession();
+      return;
+    }
+
+    if (payload == BLEConstants.authUntrusted) {
+      _pendingAuthCompleter?.complete(BleAuthOutcome.untrusted);
+      _pendingAuthCompleter = null;
+      _emit(BleConnectionStatus.error, message: payload);
       return;
     }
 
     if (payload == BLEConstants.authFailed ||
         payload == BLEConstants.authTimeout) {
-      // Auth was rejected by the PLC — the session does not go live.
-      BleCrypto.endSession();
       _pendingAuthCompleter?.complete(
         payload == BLEConstants.authTimeout
             ? BleAuthOutcome.timedOut
@@ -556,9 +528,7 @@ class BleService {
       return;
     }
 
-    // Unknown payload — treat as a security anomaly and enter safe state.
-    _logger.e('Unknown decrypted auth payload: "$payload"');
-    await _enterCryptoSafeState('Unknown auth response payload: "$payload"');
+    _logger.w('Unknown auth notification payload: "$payload"');
   }
 
   /// Attempts to decode [bytes] as UTF-8.  Returns [null] on failure rather
@@ -614,9 +584,18 @@ class BleService {
   }
 
   Future<void> _finalizeAuthenticatedSession() async {
-    // Session was already established in authenticate() via
-    // BleCrypto.beginSession() — do NOT call beginSession() again here.
-    // The session ID and packet counter are already live.
+    // Start the AES-128-GCM session NOW — after the PLC has confirmed AUTH_OK.
+    //
+    // beginSession() increments and persists the monotonic session counter so
+    // the 12-byte nonce [session_id || packet_counter] is unique across every
+    // reconnect, even after crashes or forced restarts.  This session is used
+    // exclusively for digital-characteristic writes (control commands).
+    //
+    // Auth and heartbeat characteristics use plain text; only digital char
+    // uses AES-128-GCM encryption, matching the ESP32 firmware architecture.
+    BleCrypto.endSession(); // Clear any stale state from a previous session.
+    await BleCrypto.beginSession();
+
     if (!kIsWeb && Platform.isAndroid) {
       try {
         await _device!.requestConnectionPriority(
@@ -627,9 +606,8 @@ class BleService {
         _logger.w('Could not set connection priority: $e');
       }
     }
-    // Session and session counter were already persisted in authenticate().
-    // Mark the session live and start ancillary loops.
-    _sessionAuthenticated = true; // enable AES-GCM encryption for digital-char writes
+    // Mark the session live — AES-GCM encryption is now active for digital writes.
+    _sessionAuthenticated = true;
     _emit(BleConnectionStatus.authenticated);
     _pendingAuthCompleter?.complete(BleAuthOutcome.success);
     _pendingAuthCompleter = null;
@@ -640,6 +618,7 @@ class BleService {
   Future<BleAuthOutcome> authenticate({
     required String email,
     required String password,
+    required String deviceId,
   }) async {
     if (_authChar == null) {
       throw StateError('Authentication characteristic is not ready.');
@@ -651,31 +630,24 @@ class BleService {
     final authFuture = _pendingAuthCompleter!.future;
     _emit(BleConnectionStatus.authenticating);
 
-    // Establish a new encrypted session BEFORE sending credentials.
+    // Auth payload is sent as plain text — the ESP32 firmware's
+    // AuthCallbacks::onWrite parses it directly with std::string::find('|').
     //
-    // beginSession() increments and persists the monotonic session counter so
-    // the 12-byte nonce [session_id || packet_counter] is unique across every
-    // reconnect, even after crashes or forced restarts.
+    // The AES-128-GCM session for digital-characteristic writes is NOT started
+    // here; it is started in _finalizeAuthenticatedSession() only after the
+    // PLC has confirmed AUTH_OK.  This matches the firmware architecture:
     //
-    // The PLC extracts the session ID from the nonce of this first packet and
-    // uses it for all subsequent response nonces — no separate handshake needed.
-    //
-    // endSession() first clears any state from a previous failed attempt so a
-    // retry always starts from a clean baseline.
-    BleCrypto.endSession();
-    await BleCrypto.beginSession();
+    //   Auth char   → plain text both directions
+    //   Digital char → AES-128-GCM encrypted (Flutter → PLC only)
+    //   Heartbeat   → plain text "HB"
+    final plaintext = utf8.encode('$email|$password|$deviceId');
 
-    final plaintext = utf8.encode('$email|$password');
-    final wireBytes = await BleCrypto.encrypt(plaintext);
-
-    await _authChar!.write(wireBytes, withoutResponse: false);
+    await _authChar!.write(plaintext, withoutResponse: false);
 
     try {
       return await authFuture.timeout(
         SafetyConstants.authReplyTimeout,
         onTimeout: () {
-          // Clean up the session on timeout — AUTH_OK was never received.
-          BleCrypto.endSession();
           _pendingAuthCompleter = null;
           _emit(
             BleConnectionStatus.awaitingAuthentication,
@@ -793,14 +765,9 @@ class BleService {
       debugPrint('[HB] HB dispatched (#$_hbDispatchCount)');
     }
 
-    // Encrypt through the shared AES-GCM pipeline so the global packet
-    // counter advances for every heartbeat tick, not only for control writes.
-    // The firmware uses the monotonically increasing counter across ALL
-    // characteristics to detect replay attacks and stale packets.
-    //
-    // BleCrypto._buildNonce() increments the counter *synchronously* before
-    // the first await, so a concurrent control write and a heartbeat tick
-    // dispatched in the same event-loop turn still receive distinct IVs.
+    // Send plain-text "HB" — the ESP32 firmware expects exactly this string.
+    // Heartbeats are never AES-GCM encrypted; only the digital characteristic
+    // (control commands) uses encryption.
     _encryptAndSendHeartbeat(char, useWithoutResponse).catchError((Object e) {
       _logger.w('Heartbeat write failed: $e');
       debugPrint('[HB] write error: $e');
@@ -809,20 +776,20 @@ class BleService {
 
   /// Encrypts the heartbeat payload and writes it to [char].
   ///
-  /// Re-checks [_heartbeatActive] and [_isDisposing] after the async gap so
-  /// a write is never attempted after disconnect or dispose has begun.
-  /// Any [StateError] from [BleCrypto.encrypt] (session ended mid-flight) is
-  /// caught by the [.catchError] at the call site in [_sendHeartbeatTick].
+  /// Sends the plain-text heartbeat payload to [char].
+  ///
+  /// The ESP32 firmware's HeartbeatCallbacks::onWrite expects exactly the
+  /// two-byte UTF-8 string "HB". Any other value — including AES-GCM
+  /// ciphertext — is explicitly rejected. Heartbeats are never encrypted.
+  ///
+  /// Re-checks [_heartbeatActive] and [_isDisposing] before writing so a
+  /// write is never attempted after disconnect or dispose has begun.
   Future<void> _encryptAndSendHeartbeat(
     BluetoothCharacteristic char,
     bool useWithoutResponse,
   ) async {
-    final plainBytes = utf8.encode(BLEConstants.heartbeatPayload);
-    final wireBytes = _sessionAuthenticated
-        ? await BleCrypto.encrypt(plainBytes)
-        : plainBytes;
-    // Re-check after the async gap: disconnect may have occurred while the
-    // AES-GCM operation was in flight.
+    // Plain text "HB" — firmware expects exactly this, no AES-GCM.
+    final wireBytes = utf8.encode(BLEConstants.heartbeatPayload);
     if (!_heartbeatActive || _isDisposing) return;
     await char.write(wireBytes, withoutResponse: useWithoutResponse);
   }
