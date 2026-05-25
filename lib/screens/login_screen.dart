@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import 'package:tusker_trailer_rrc/utils/constants.dart';
 import 'package:tusker_trailer_rrc/services/ble_service.dart';
+import 'package:tusker_trailer_rrc/services/biometric_service.dart';
 import 'package:tusker_trailer_rrc/controllers/crane_controllers.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -21,6 +22,8 @@ class _LoginScreenState extends State<LoginScreen>
 
   bool _seeded = false;
   bool _obscurePassword = true;
+  bool _biometricLoading = false;
+  BiometricAuthResult? _lastBiometricResult;
   AutovalidateMode _autovalidateMode = AutovalidateMode.disabled;
 
   late final AnimationController _introController;
@@ -234,20 +237,20 @@ class _LoginScreenState extends State<LoginScreen>
               'SECURE BLE LINK',
               style: TextStyle(
                 color: Colors.white,
-                fontSize: 11,
+                fontSize: 8,
                 letterSpacing: 1.1,
                 fontWeight: FontWeight.w800,
               ),
             ),
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 5),
           Center(
             child: _BeaconPulse(
               animation: _pulseController,
               active: controller.isAuthenticating || linkReady,
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 0),
           const Text(
             'Authenticate Operator Session',
             style: TextStyle(
@@ -265,26 +268,26 @@ class _LoginScreenState extends State<LoginScreen>
               height: 1.35,
             ),
           ),
-          const SizedBox(height: 16),
-          _ContextInfoPill(
-            icon: Icons.bluetooth_connected_rounded,
-            label: 'Connected device',
-            value: connectedDevice,
-          ),
-          const SizedBox(height: 8),
-          _ContextInfoPill(
-            icon: Icons.settings_ethernet_rounded,
-            label: 'Transport state',
-            value: statusLabel,
-          ),
-          const SizedBox(height: 8),
-          _ContextInfoPill(
-            icon: controller.isAuthenticating
-                ? Icons.sync_rounded
-                : Icons.radar_rounded,
-            label: 'Session',
-            value: statusCaption,
-          ),
+          // const SizedBox(height: 8),
+          // _ContextInfoPill(
+          //   icon: Icons.bluetooth_connected_rounded,
+          //   label: 'Connected device',
+          //   value: connectedDevice,
+          // ),
+          // const SizedBox(height: 8),
+          // _ContextInfoPill(
+          //   icon: Icons.settings_ethernet_rounded,
+          //   label: 'Transport state',
+          //   value: statusLabel,
+          // ),
+          // const SizedBox(height: 8),
+          // _ContextInfoPill(
+          //   icon: controller.isAuthenticating
+          //       ? Icons.sync_rounded
+          //       : Icons.radar_rounded,
+          //   label: 'Session',
+          //   value: statusCaption,
+          // ),
           // const SizedBox(height: 18),
           // const _JourneyStep(
           //   done: true,
@@ -317,6 +320,9 @@ class _LoginScreenState extends State<LoginScreen>
   }) {
     final authSessionReady = _hasAuthenticationSession(controller);
     final errorState = _resolveErrorState(controller.errorMessage);
+    // Disable all form inputs while either manual PLC auth or biometric auth
+    // is in flight, preventing concurrent or conflicting auth attempts.
+    final bool busy = controller.isAuthenticating || _biometricLoading;
 
     return Container(
       padding: EdgeInsets.all(isWide ? 26 : 20),
@@ -328,21 +334,21 @@ class _LoginScreenState extends State<LoginScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Operator Login',
-            style: TextStyle(
-              color: ConnectionColors.textPrimary,
-              fontSize: 28,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.4,
-            ),
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'Sign in to start a secure crane control session.',
-            style: TextStyle(color: ConnectionColors.textMuted, fontSize: 13.5),
-          ),
-          const SizedBox(height: 14),
+          // const Text(
+          //   'Operator Login',
+          //   style: TextStyle(
+          //     color: ConnectionColors.textPrimary,
+          //     fontSize: 28,
+          //     fontWeight: FontWeight.w800,
+          //     letterSpacing: -0.4,
+          //   ),
+          // ),
+          // const SizedBox(height: 6),
+          // const Text(
+          //   'Sign in to start a secure crane control session.',
+          //   style: TextStyle(color: ConnectionColors.textMuted, fontSize: 13.5),
+          // ),
+          // const SizedBox(height: 14),
           _buildLiveStatusBanner(controller),
           if (controller.isAuthenticating) ...[
             const SizedBox(height: 12),
@@ -383,7 +389,7 @@ class _LoginScreenState extends State<LoginScreen>
               children: [
                 TextFormField(
                   controller: _emailController,
-                  enabled: !controller.isAuthenticating,
+                  enabled: !busy,
                   keyboardType: TextInputType.emailAddress,
                   textInputAction: TextInputAction.next,
                   style: const TextStyle(
@@ -412,7 +418,7 @@ class _LoginScreenState extends State<LoginScreen>
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _passwordController,
-                  enabled: !controller.isAuthenticating,
+                  enabled: !busy,
                   obscureText: _obscurePassword,
                   textInputAction: TextInputAction.done,
                   onFieldSubmitted: (_) => _submit(),
@@ -470,7 +476,7 @@ class _LoginScreenState extends State<LoginScreen>
                       activeTrackColor: ConnectionColors.scanning.withValues(
                         alpha: 0.35,
                       ),
-                      onChanged: controller.isAuthenticating
+                      onChanged: busy
                           ? null
                           : controller.setRememberCredentials,
                     ),
@@ -484,8 +490,8 @@ class _LoginScreenState extends State<LoginScreen>
             width: double.infinity,
             height: 52,
             child: FilledButton.icon(
-              onPressed: controller.isAuthenticating ? null : _submit,
-              icon: controller.isAuthenticating
+              onPressed: busy ? null : _submit,
+              icon: busy
                   ? const SizedBox(
                       width: 16,
                       height: 16,
@@ -496,7 +502,7 @@ class _LoginScreenState extends State<LoginScreen>
                     )
                   : const Icon(Icons.lock_open_rounded, size: 18),
               label: Text(
-                controller.isAuthenticating
+                busy
                     ? 'AUTHENTICATING...'
                     : 'AUTHENTICATE SESSION',
                 style: const TextStyle(
@@ -519,7 +525,7 @@ class _LoginScreenState extends State<LoginScreen>
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: controller.isAuthenticating
+                  onPressed: busy
                       ? null
                       : controller.disconnect,
                   icon: const Icon(Icons.arrow_back_rounded, size: 16),
@@ -534,26 +540,23 @@ class _LoginScreenState extends State<LoginScreen>
                   ),
                 ),
               ),
-              // const SizedBox(width: 8),
-              // Expanded(
-              //   child: TextButton.icon(
-              //     onPressed: controller.isAuthenticating
-              //         ? null
-              //         : _showDefaultCredentials,
-              //     icon: const Icon(Icons.admin_panel_settings_outlined, size: 16),
-              //     label: const Text('Default Login'),
-              //     style: TextButton.styleFrom(
-              //       foregroundColor: ConnectionColors.primary,
-              //       padding: const EdgeInsets.symmetric(vertical: 12),
-              //       shape: RoundedRectangleBorder(
-              //         borderRadius: BorderRadius.circular(12),
-              //         side: const BorderSide(color: ConnectionColors.primarySoft),
-              //       ),
-              //     ),
-              //   ),
-              // ),
             ],
           ),
+          // ── Biometric authentication section ────────────────────────────
+          if (_biometricLoginVisible(controller)) ...[
+            const SizedBox(height: 14),
+            _buildOrDivider(),
+            const SizedBox(height: 12),
+            if (_lastBiometricResult != null &&
+                !_lastBiometricResult!.isSuccess &&
+                !_lastBiometricResult!.isCancelled) ...[
+              _AuthErrorCard(
+                state: _resolveBiometricError(_lastBiometricResult!),
+              ),
+              const SizedBox(height: 10),
+            ],
+            _buildBiometricButton(busy),
+          ],
         ],
       ),
     );
@@ -657,9 +660,12 @@ class _LoginScreenState extends State<LoginScreen>
   bool _hasAuthenticationSession(CraneController controller) {
     final status = controller.connectionState.status;
     final hasDevice = controller.connectionState.connectedDevice != null;
+    // Also allow when the enrollment-offer gate is active: the status is
+    // already `authenticated` but the screen is intentionally held here.
     return status == BleConnectionStatus.awaitingAuthentication ||
         status == BleConnectionStatus.authenticating ||
-        (status == BleConnectionStatus.error && hasDevice);
+        (status == BleConnectionStatus.error && hasDevice) ||
+        controller.hasPendingEnrollmentOffer;
   }
 
   String _statusTitle(BleConnectionStatus status) {
@@ -744,12 +750,33 @@ class _LoginScreenState extends State<LoginScreen>
       return;
     }
 
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+
     final success = await controller.authenticate(
-      email: _emailController.text.trim(),
-      password: _passwordController.text,
+      email: email,
+      password: password,
     );
 
-    if (!mounted || success) {
+    if (!mounted) return;
+
+    if (success) {
+      // The controller may have set a _pendingEnrollmentOffer gate that keeps
+      // the current screen on AppScreen.authentication. Show the enrollment
+      // dialog now, then release the gate to allow the ControlScreen
+      // transition — ensuring the dialog is 100% inside the auth screen.
+      if (controller.hasPendingEnrollmentOffer) {
+        await _offerBiometricEnrollment(
+          email: email,
+          password: password,
+          controller: controller,
+        );
+      }
+      // Release the gate regardless of whether enrollment was offered or
+      // accepted, so the app always navigates to ControlScreen on success.
+      if (mounted) {
+        context.read<CraneController>().completePendingEnrollmentOffer();
+      }
       return;
     }
 
@@ -757,6 +784,221 @@ class _LoginScreenState extends State<LoginScreen>
     if (resolved != null) {
       _showSnack('${resolved.title}: ${resolved.message}');
     }
+  }
+
+  // ── Biometric login ───────────────────────────────────────────────────────
+
+  /// Whether the biometric login section should be visible to the operator.
+  bool _biometricLoginVisible(CraneController controller) {
+    return controller.isBiometricAvailable &&
+        controller.isBiometricEnrolled &&
+        _hasAuthenticationSession(controller);
+  }
+
+  /// Runs the full biometric → PLC authentication pipeline.
+  Future<void> _submitWithBiometrics() async {
+    if (_biometricLoading || !mounted) return;
+
+    final controller = context.read<CraneController>();
+    if (!_hasAuthenticationSession(controller)) {
+      _showSnack(
+        'Connection session ended. Return to scan and reconnect before retrying.',
+      );
+      return;
+    }
+
+    setState(() {
+      _biometricLoading = true;
+      _lastBiometricResult = null;
+    });
+
+    final result = await controller.authenticateWithBiometrics();
+
+    if (!mounted) return;
+
+    setState(() {
+      _biometricLoading = false;
+      if (!result.isSuccess && !result.isCancelled) {
+        _lastBiometricResult = result;
+      }
+    });
+
+    // On success the controller stream drives the screen transition.
+    // Cancellation is silent — the biometric button remains available.
+  }
+
+  /// Offers the operator the option to enroll biometrics after a successful
+  /// manual login. Shows only when the device supports biometrics and no
+  /// credentials are currently enrolled for this app.
+  Future<void> _offerBiometricEnrollment({
+    required String email,
+    required String password,
+    required CraneController controller,
+  }) async {
+    if (!mounted) return;
+    // This method is only called when hasPendingEnrollmentOffer is true,
+    // which implies biometricAvailable=true and biometricEnrolled=false.
+    // The guard below is a safety-net for any future direct call sites.
+    if (!controller.isBiometricAvailable || controller.isBiometricEnrolled) {
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => const _BiometricEnrollmentDialog(),
+    );
+
+    if (!mounted || confirmed != true) return;
+
+    final ctrl = context.read<CraneController>();
+    final enrolled = await ctrl.enrollBiometrics(email: email, password: password);
+
+    if (mounted && enrolled) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.all(16),
+            duration: const Duration(seconds: 3),
+            backgroundColor: ConnectionColors.connected,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            content: const Row(
+              children: [
+                Icon(
+                  Icons.check_circle_rounded,
+                  color: Colors.white,
+                  size: 18,
+                ),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Fingerprint login enabled for this device.',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+    }
+  }
+
+  /// Maps a [BiometricAuthResult] failure to an [_AuthErrorState] for display.
+  _AuthErrorState _resolveBiometricError(BiometricAuthResult result) {
+    return switch (result.status) {
+      BiometricAuthStatus.failure => const _AuthErrorState(
+        title: 'PLC authentication failed',
+        message:
+            'PLC rejected stored operator credentials. Log in manually to re-enrol biometric access.',
+        icon: Icons.lock_person_rounded,
+      ),
+      BiometricAuthStatus.lockedOut => const _AuthErrorState(
+        title: 'Biometric temporarily locked',
+        message:
+            'Too many failed attempts. Wait briefly, then retry or use manual login.',
+        icon: Icons.lock_clock_rounded,
+      ),
+      BiometricAuthStatus.permanentlyLockedOut => const _AuthErrorState(
+        title: 'Biometric permanently locked',
+        message:
+            'Unlock your device with PIN to reset biometrics, then re-enable fingerprint login.',
+        icon: Icons.lock_outline_rounded,
+      ),
+      BiometricAuthStatus.notEnrolled => const _AuthErrorState(
+        title: 'No fingerprints enrolled',
+        message:
+            'Configure fingerprint authentication in device security settings, then return.',
+        icon: Icons.fingerprint,
+      ),
+      BiometricAuthStatus.credentialsMissing => const _AuthErrorState(
+        title: 'Operator credentials not found',
+        message:
+            'Stored credentials were cleared. Log in manually to re-enable fingerprint access.',
+        icon: Icons.key_off_rounded,
+      ),
+      BiometricAuthStatus.notAvailable => const _AuthErrorState(
+        title: 'Biometric unavailable',
+        message: 'Biometric hardware is not available. Use manual login.',
+        icon: Icons.fingerprint,
+      ),
+      _ => _AuthErrorState(
+        title: 'Biometric authentication error',
+        message: result.message ??
+            'An unexpected error occurred. Please use manual login.',
+        icon: Icons.error_outline_rounded,
+      ),
+    };
+  }
+
+  // ── Biometric UI widgets ──────────────────────────────────────────────────
+
+  Widget _buildOrDivider() {
+    return const Row(
+      children: [
+        Expanded(
+          child: Divider(color: ConnectionColors.border, height: 1),
+        ),
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: 14),
+          child: Text(
+            'OR',
+            style: TextStyle(
+              color: ConnectionColors.textMuted,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.0,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Divider(color: ConnectionColors.border, height: 1),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBiometricButton(bool busy) {
+    return SizedBox(
+      width: double.infinity,
+      height: 52,
+      child: OutlinedButton.icon(
+        onPressed: busy ? null : _submitWithBiometrics,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: ConnectionColors.primary,
+          side: const BorderSide(color: ConnectionColors.border, width: 1.5),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+          disabledForegroundColor: ConnectionColors.neutral,
+          disabledMouseCursor: SystemMouseCursors.forbidden,
+        ),
+        icon: _biometricLoading
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.2,
+                  color: ConnectionColors.primary,
+                ),
+              )
+            : const Icon(Icons.fingerprint, size: 22),
+        label: Text(
+          _biometricLoading ? 'VERIFYING IDENTITY...' : 'BIOMETRIC LOGIN',
+          style: const TextStyle(
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.8,
+            fontSize: 13.5,
+          ),
+        ),
+      ),
+    );
   }
 
   void _showSnack(String message) {
@@ -1115,33 +1357,99 @@ class _AuthErrorCard extends StatelessWidget {
                       minimumSize: Size.zero,
                     ),
                   ),
-                // if (onBackToScan != null)
-                //   OutlinedButton.icon(
-                //     onPressed: onBackToScan,
-                //     icon: const Icon(Icons.bluetooth_searching_rounded, size: 14),
-                //     label: const Text('Back to scan'),
-                //     style: OutlinedButton.styleFrom(
-                //       foregroundColor: ConnectionColors.error,
-                //       side: BorderSide(
-                //         color: ConnectionColors.error.withValues(alpha: 0.35),
-                //       ),
-                //       padding: const EdgeInsets.symmetric(
-                //         horizontal: 12,
-                //         vertical: 10,
-                //       ),
-                //       textStyle: const TextStyle(
-                //         fontSize: 12,
-                //         fontWeight: FontWeight.w700,
-                //       ),
-                //       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                //       minimumSize: Size.zero,
-                //     ),
-                //   ),
               ],
             ),
           ],
         ],
       ),
+    );
+  }
+}
+
+// ── Biometric enrollment dialog ───────────────────────────────────────────────
+
+/// Industrial-style confirmation dialog shown after a successful manual login
+/// when the device supports biometrics and no credentials are yet enrolled.
+class _BiometricEnrollmentDialog extends StatelessWidget {
+  const _BiometricEnrollmentDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: ConnectionColors.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+      contentPadding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+      actionsPadding: const EdgeInsets.fromLTRB(12, 8, 12, 14),
+      title: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(9),
+            decoration: BoxDecoration(
+              color: ConnectionColors.primarySoft,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.fingerprint,
+              color: ConnectionColors.primary,
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text(
+              'Enable Fingerprint Login',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+                color: ConnectionColors.textPrimary,
+                height: 1.2,
+              ),
+            ),
+          ),
+        ],
+      ),
+      content: const Text(
+        'Access this device faster next session using your fingerprint or '
+        'face ID — no need to re-enter your credentials.\n\n'
+        "Your operator credentials are stored in this device's hardware "
+        'keystore and are never transmitted over the network.',
+        style: TextStyle(
+          color: ConnectionColors.textSecondary,
+          fontSize: 13.5,
+          height: 1.45,
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          style: TextButton.styleFrom(
+            foregroundColor: ConnectionColors.textMuted,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+          child: const Text(
+            'NOT NOW',
+            style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: 0.5),
+          ),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          style: FilledButton.styleFrom(
+            backgroundColor: ConnectionColors.primary,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+          ),
+          child: const Text(
+            'ENABLE',
+            style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 0.5),
+          ),
+        ),
+      ],
     );
   }
 }

@@ -5,6 +5,8 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:tusker_trailer_rrc/models/ble_scan_device.dart';
 import 'package:tusker_trailer_rrc/models/plc_output_command.dart';
 import 'package:tusker_trailer_rrc/services/ble_service.dart';
+import 'package:tusker_trailer_rrc/services/biometric_service.dart';
+import 'package:tusker_trailer_rrc/services/secure_credential_store.dart';
 import 'package:tusker_trailer_rrc/services/permission_service.dart';
 import 'package:tusker_trailer_rrc/utils/constants.dart';
 import 'package:tusker_trailer_rrc/utils/preferences.dart';
@@ -47,6 +49,12 @@ class CraneController extends ChangeNotifier {
   bool _rememberCredentials = true;
   bool _estopLatched = false;
   bool _startupEmergencyArmedForConnection = false;
+  bool _biometricAvailable = false;
+  bool _biometricEnrolled = false;
+  // When true, currentScreen returns AppScreen.authentication even though
+  // the BLE session has already authenticated. This holds the LoginScreen
+  // in view until the biometric-enrollment offer dialog has been resolved.
+  bool _pendingEnrollmentOffer = false;
   String? _sessionEmail;
   String? _errorMessage;
   String _savedEmail = '';
@@ -76,6 +84,13 @@ class CraneController extends ChangeNotifier {
   // bool get fastActive => _fastActive;
 
   bool get rememberCredentials => _rememberCredentials;
+  bool get isBiometricAvailable => _biometricAvailable;
+  bool get isBiometricEnrolled => _biometricEnrolled;
+  /// True while the biometric-enrollment offer dialog is pending in the
+  /// authentication screen. Causes [currentScreen] to stay on
+  /// [AppScreen.authentication] until [completePendingEnrollmentOffer] is
+  /// called.
+  bool get hasPendingEnrollmentOffer => _pendingEnrollmentOffer;
   PlcOutputCommand get activeCommand => _activeCommand;
   bool get estopLatched => _estopLatched;
   bool get upHoldActive => _activeDirectionalHolds.contains(HoistDirection.up);
@@ -162,7 +177,10 @@ class CraneController extends ChangeNotifier {
   String get statusLabel => _activeCommand.statusLabel;
 
   AppScreen get currentScreen => switch (_transportConnState.status) {
-    BleConnectionStatus.authenticated => AppScreen.control,
+    // When the enrollment-offer dialog is pending we stay on the
+    // authentication screen so the dialog never bleeds into ControlScreen.
+    BleConnectionStatus.authenticated =>
+      _pendingEnrollmentOffer ? AppScreen.authentication : AppScreen.control,
     BleConnectionStatus.awaitingAuthentication ||
     BleConnectionStatus.authenticating => AppScreen.authentication,
     BleConnectionStatus.error
@@ -332,6 +350,7 @@ class CraneController extends ChangeNotifier {
           _savedEmail.isNotEmpty && _savedPassword.isNotEmpty;
 
       await _prepareRunTime();
+      await checkBiometricStatus();
       debugPrint(
         'Initialization complete. Bluetooth ready: $bluetoothReady, Permissions granted: $permissionsGranted',
       );
@@ -360,9 +379,15 @@ class CraneController extends ChangeNotifier {
         _deadmanHeld = false;
         _startupEmergencyArmedForConnection = false;
         _sessionEmail = null;
+        _pendingEnrollmentOffer = false; // Clean up any stale offer state.
       } else if (snapshot.status == BleConnectionStatus.authenticated &&
           previousStatus != BleConnectionStatus.authenticated) {
         unawaited(ensureControlEntryEmergencyLock());
+        // If biometrics are available but not yet enrolled, gate the screen
+        // transition so the UI can present the enrollment dialog first.
+        if (_biometricAvailable && !_biometricEnrolled) {
+          _pendingEnrollmentOffer = true;
+        }
       }
       notifyListeners();
     });
@@ -775,6 +800,122 @@ class CraneController extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+  }
+
+  // ── Biometric authentication ──────────────────────────────────────────────
+
+  /// Checks and caches device biometric availability and app-level enrollment.
+  ///
+  /// Called during [initialize] and after any enrollment change. Safe to call
+  /// at any time — reads only from the local keystore, no BLE I/O.
+  Future<void> checkBiometricStatus() async {
+    _biometricAvailable = await BiometricService.isAvailableAndEnrolled();
+    _biometricEnrolled =
+        _biometricAvailable && await SecureCredentialStore.hasCredentials();
+    notifyListeners();
+  }
+
+  /// Enrolls biometric credentials for this device after a successful manual
+  /// PLC-authenticated login.
+  ///
+  /// Returns true on success, false if the Keystore write fails.
+  /// MUST only be called after [authenticate] has returned true.
+  Future<bool> enrollBiometrics({
+    required String email,
+    required String password,
+  }) async {
+    if (!_biometricAvailable) return false;
+    try {
+      await SecureCredentialStore.storeCredentials(
+        email: email,
+        password: password,
+      );
+      _biometricEnrolled = true;
+      notifyListeners();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Authenticates the operator via device biometrics, then runs the full
+  /// PLC authentication pipeline with the stored operator credentials.
+  ///
+  /// The PLC ALWAYS validates the operator — biometric authentication is a
+  /// local convenience layer only. It never bypasses PLC-side validation,
+  /// single-operator enforcement, or the AES-GCM encrypted auth pipeline.
+  ///
+  /// Returns a [BiometricAuthResult] describing the outcome.
+  Future<BiometricAuthResult> authenticateWithBiometrics() async {
+    if (!_biometricAvailable || !_biometricEnrolled) {
+      return const BiometricAuthResult(
+        status: BiometricAuthStatus.notAvailable,
+        message: 'Biometric authentication is not configured on this device.',
+      );
+    }
+
+    // Step 1 — Local biometric verification (device biometric hardware gate).
+    final biometricResult = await BiometricService.authenticate();
+    if (!biometricResult.isSuccess) {
+      return biometricResult;
+    }
+
+    // Step 2 — Retrieve credentials from hardware-backed secure storage.
+    //           Only reachable after successful biometric verification above.
+    final credentials = await SecureCredentialStore.retrieveCredentials();
+    if (credentials == null) {
+      _biometricEnrolled = false;
+      notifyListeners();
+      return const BiometricAuthResult(
+        status: BiometricAuthStatus.credentialsMissing,
+        message:
+            'Stored operator credentials not found. Log in manually to re-enable biometric access.',
+      );
+    }
+
+    // Step 3 — Full PLC authentication via AES-GCM encrypted pipeline.
+    //           PLC validates the operator, enforces single-operator policy,
+    //           and returns AUTH_OK / AUTH_FAIL as normal.
+    _errorMessage = null;
+    final plcSuccess = await authenticate(
+      email: credentials.email,
+      password: credentials.password,
+    );
+
+    if (!plcSuccess) {
+      // PLC rejected stored credentials — they are stale or revoked.
+      // Clear enrollment so the operator must log in manually to re-enroll.
+      await SecureCredentialStore.clearCredentials();
+      _biometricEnrolled = false;
+      notifyListeners();
+      return BiometricAuthResult(
+        status: BiometricAuthStatus.failure,
+        message: _errorMessage ??
+            'PLC rejected stored operator credentials. Please log in manually.',
+      );
+    }
+
+    return const BiometricAuthResult(status: BiometricAuthStatus.success);
+  }
+
+  /// Clears stored biometric credentials and resets enrollment state.
+  ///
+  /// Call when an operator explicitly revokes biometric access.
+  Future<void> clearBiometricEnrollment() async {
+    await SecureCredentialStore.clearCredentials();
+    _biometricEnrolled = false;
+    notifyListeners();
+  }
+
+  /// Releases the enrollment-offer screen hold, allowing the app to navigate
+  /// from the authentication screen to the control screen.
+  ///
+  /// Must be called by the UI exactly once after the biometric enrollment
+  /// dialog has been resolved — whether accepted or dismissed.
+  void completePendingEnrollmentOffer() {
+    if (!_pendingEnrollmentOffer) return;
+    _pendingEnrollmentOffer = false;
+    notifyListeners();
   }
 
   @override
