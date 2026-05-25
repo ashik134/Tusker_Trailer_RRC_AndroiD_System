@@ -4,23 +4,22 @@ import 'package:local_auth/error_codes.dart' as auth_error;
 
 /// Describes device-level biometric hardware and enrollment status.
 enum BiometricAvailability {
-  /// Hardware present and at least one credential (fingerprint / face) enrolled.
+ 
   available,
 
-  /// Device does not support biometric authentication.
+ 
   notAvailable,
 
-  /// Hardware present but no biometrics are enrolled on the device.
+  
   notEnrolled,
 
-  /// Biometric hardware is temporarily or permanently locked out.
   lockedOut,
 
-  /// Availability could not be determined.
+ 
   unknown,
 }
 
-/// Outcome status for a single biometric authentication attempt.
+
 enum BiometricAuthStatus {
   /// Biometric verified successfully.
   success,
@@ -75,12 +74,9 @@ class BiometricService {
 
   static final LocalAuthentication _auth = LocalAuthentication();
 
-  // ── Availability ──────────────────────────────────────────────────────────
+  //  Availability 
 
-  /// Returns the device-level biometric availability status.
-  ///
-  /// Returns [BiometricAvailability.available] only when hardware is present
-  /// AND at least one biometric credential is enrolled.
+  
   static Future<BiometricAvailability> checkAvailability() async {
     try {
       final isSupported = await _auth.isDeviceSupported();
@@ -105,11 +101,11 @@ class BiometricService {
     }
   }
 
-  /// Returns true when the device has usable enrolled biometrics.
+ 
   static Future<bool> isAvailableAndEnrolled() async =>
       (await checkAvailability()) == BiometricAvailability.available;
 
-  /// Returns the list of available biometric types enrolled on the device.
+  
   static Future<List<BiometricType>> getAvailableBiometrics() async {
     try {
       return await _auth.getAvailableBiometrics();
@@ -118,15 +114,9 @@ class BiometricService {
     }
   }
 
-  // ── Authentication ────────────────────────────────────────────────────────
+  // ── Authentication
 
-  /// Presents the system biometric prompt to the operator.
-  ///
-  /// Uses [AuthenticationOptions.biometricOnly] — device PIN/pattern does NOT
-  /// satisfy this check. This enforces that only the physical biometric gate
-  /// (fingerprint / face) grants access to stored operator credentials.
-  ///
-  /// Returns a [BiometricAuthResult] — never throws.
+ 
   static Future<BiometricAuthResult> authenticate() async {
     try {
       final authenticated = await _auth.authenticate(
@@ -144,8 +134,7 @@ class BiometricService {
         return const BiometricAuthResult(status: BiometricAuthStatus.success);
       }
 
-      // authenticate() returning false without a PlatformException means the
-      // operator dismissed the prompt (cancelled or timed out on the dialog).
+      
       return const BiometricAuthResult(
         status: BiometricAuthStatus.cancelled,
         message: 'Biometric authentication cancelled.',
@@ -160,7 +149,7 @@ class BiometricService {
     }
   }
 
-  /// Maps a [PlatformException] from the local_auth plugin to a typed result.
+ 
   static BiometricAuthResult _fromPlatformException(PlatformException e) {
     final code = e.code;
 
@@ -198,7 +187,6 @@ class BiometricService {
     );
   }
 
-  /// Cancels any in-progress biometric prompt.
   static Future<void> stopAuthentication() async {
     try {
       await _auth.stopAuthentication();

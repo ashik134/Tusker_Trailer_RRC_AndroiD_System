@@ -686,7 +686,7 @@ class BleService {
     final bool useWithoutResponse =
         _heartbeatChar!.properties.writeWithoutResponse;
     debugPrint(
-      '[HB] Heartbeat started — interval=100ms '
+      '[HB] Heartbeat started — interval=50ms '
       'writeWithoutResponse=$useWithoutResponse',
     );
 
