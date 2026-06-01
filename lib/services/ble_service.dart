@@ -75,8 +75,7 @@ class BleService {
   Completer<void>? _pendingSafeStateCompleter;
   bool _isDisposing = false;
 
-  // True once the PLC has confirmed AUTH_OK and the session is live.
-  // Digital-characteristic writes are AES-128-GCM encrypted while this is true.
+  
   bool _sessionAuthenticated = false;
 
   // ── Live RSSI polling ───────────────────────────────────────────────────────
@@ -153,7 +152,7 @@ class BleService {
         break;
       }
       if (!_scanShouldContinue || _isDisposing) break;
-      // Brief gap between bursts to let the radio rest.
+      
       await Future.delayed(const Duration(milliseconds: 400));
     }
 
@@ -165,7 +164,7 @@ class BleService {
   }
 
   Future<void> stopScan() async {
-    _scanShouldContinue = false; // Break the continuous scan loop.
+    _scanShouldContinue = false;
     await FlutterBluePlus.stopScan();
     _scanResultsSub?.cancel();
     _scanResultsSub = null;
@@ -240,7 +239,7 @@ class BleService {
       _authChar = null;
 
       _statusChar = null;
-      _heartbeatChar = null; // reset before each discovery pass
+      _heartbeatChar = null; 
 
       for (final service in services) {
         if (service.uuid.toString().toLowerCase() !=
@@ -287,7 +286,7 @@ class BleService {
       _digitalChar = digital;
       _authChar = auth;
       _statusChar = status;
-      // _heartbeatChar was assigned inline above (optional — no error if absent).
+    
       if (_heartbeatChar == null) {
         debugPrint(
           '[BLE] WARNING: Heartbeat characteristic NOT found '
@@ -326,8 +325,8 @@ class BleService {
   }
 
   Future<void> disconnect({bool emitState = true}) async {
-    _stopRssiPolling(); // Stop polling before tearing down the BLE link.
-    _stopHeartbeat(); // Stop heartbeat before tearing down the BLE link.
+    _stopRssiPolling();
+    _stopHeartbeat(); 
     _pendingAuthCompleter?.complete(BleAuthOutcome.failed);
     _pendingAuthCompleter = null;
     final pendingSafeState = _pendingSafeStateCompleter;
@@ -346,7 +345,7 @@ class BleService {
         _logger.w('Safe-state cleanup write failed during disconnect.');
       }
     }
-    _sessionAuthenticated = false; // clear before tearing down characteristics
+    _sessionAuthenticated = false; 
 
     await _authSubscription?.cancel();
     await _statusSubscription?.cancel();
@@ -381,7 +380,7 @@ class BleService {
     _stopRssiPolling();
     _stopHeartbeat();
     _sessionAuthenticated = false;
-    BleCrypto.endSession(); // clear in-memory IV state; persisted counter stays as watermark
+    BleCrypto.endSession();
     _device = null;
     _connectedDevice = null;
     _connStateSub?.cancel();
@@ -475,8 +474,7 @@ class BleService {
   }
 
   void _handleAuthNotification(List<int> bytes) {
-    // Pre-session: only the plaintext AUTH_REQ prompt from the PLC is expected
-    // here.  All actual auth responses (AUTH_OK / AUTH_FAIL) are encrypted.
+   
     if (!BleCrypto.sessionActive) {
       final payload = _tryDecodeUtf8(bytes)?.trim();
       if (payload == BLEConstants.authRequest) {
@@ -485,7 +483,7 @@ class BleService {
         }
         return;
       }
-      // Any other plaintext before a session is established is unexpected.
+     
       _logger.w(
         'Auth notification before session active '
         '(ignored): ${payload ?? "<binary>"}',
@@ -493,20 +491,10 @@ class BleService {
       return;
     }
 
-    // Active session: every notification MUST be AES-GCM encrypted.
-    // Fire-and-forget the async decryption — errors are handled inside.
     _decryptAndHandleAuthNotification(bytes);
   }
 
-  /// Decrypts an inbound auth-characteristic notification and drives the
-  /// authentication state machine.
-  ///
-  /// Separated from [_handleAuthNotification] so the notification callback
-  /// (synchronous BLE thread) can return immediately while decryption and
-  /// validation run on the event loop.
-  ///
-  /// On ANY cryptographic failure this method calls [_enterCryptoSafeState],
-  /// which stops all outputs, ends the session, and forces re-authentication.
+
   Future<void> _decryptAndHandleAuthNotification(List<int> bytes) async {
     if (_isDisposing) return;
 
@@ -544,7 +532,7 @@ class BleService {
 
     if (payload == BLEConstants.authFailed ||
         payload == BLEConstants.authTimeout) {
-      // Auth was rejected by the PLC — the session does not go live.
+      
       BleCrypto.endSession();
       _pendingAuthCompleter?.complete(
         payload == BLEConstants.authTimeout
@@ -556,13 +544,12 @@ class BleService {
       return;
     }
 
-    // Unknown payload — treat as a security anomaly and enter safe state.
+
     _logger.e('Unknown decrypted auth payload: "$payload"');
     await _enterCryptoSafeState('Unknown auth response payload: "$payload"');
   }
 
-  /// Attempts to decode [bytes] as UTF-8.  Returns [null] on failure rather
-  /// than throwing, so callers can handle malformed payloads safely.
+
   String? _tryDecodeUtf8(List<int> bytes) {
     try {
       return utf8.decode(bytes);
@@ -571,52 +558,35 @@ class BleService {
     }
   }
 
-  /// Immediately enters safe state after a cryptographic validation failure.
-  ///
-  /// This is triggered whenever decryption, tag verification, session
-  /// validation, counter validation, or replay detection fails on an inbound
-  /// BLE packet.
-  ///
-  /// Because this system controls safety-critical crane/trailer hardware,
-  /// ANY cryptographic failure MUST:
-  ///   1. Stop all active output loops (heartbeat).
-  ///   2. Terminate the encrypted session.
-  ///   3. Fail any pending authentication.
-  ///   4. Emit an error state visible to the UI.
-  ///   5. Disconnect the BLE session and require re-authentication.
   Future<void> _enterCryptoSafeState(String reason) async {
     if (_isDisposing) return;
 
     _logger.e('CRYPTO SAFE STATE ENTERED: $reason');
     debugPrint('[SECURITY] Entering crypto safe state — reason: $reason');
 
-    // 1. Stop all active output loops immediately.
+  
     _stopHeartbeat();
 
-    // 2. Clear the authenticated session — no further encrypted writes allowed.
+   
     _sessionAuthenticated = false;
     BleCrypto.endSession();
 
-    // 3. Fail any pending authentication future.
+   
     _pendingAuthCompleter?.complete(BleAuthOutcome.failed);
     _pendingAuthCompleter = null;
 
-    // 4. Surface the security error to the UI.
+   
     _emit(
       BleConnectionStatus.error,
       message: 'Security error — session terminated. Please reconnect.',
     );
 
-    // 5. Disconnect.  disconnect(emitState: false) preserves our error state
-    //    above and attempts a best-effort plaintext safe-state write before
-    //    tearing down the BLE link.
+   
     await disconnect(emitState: false);
   }
 
   Future<void> _finalizeAuthenticatedSession() async {
-    // Session was already established in authenticate() via
-    // BleCrypto.beginSession() — do NOT call beginSession() again here.
-    // The session ID and packet counter are already live.
+    
     if (!kIsWeb && Platform.isAndroid) {
       try {
         await _device!.requestConnectionPriority(
@@ -627,14 +597,13 @@ class BleService {
         _logger.w('Could not set connection priority: $e');
       }
     }
-    // Session and session counter were already persisted in authenticate().
-    // Mark the session live and start ancillary loops.
-    _sessionAuthenticated = true; // enable AES-GCM encryption for digital-char writes
+    
+    _sessionAuthenticated = true; 
     _emit(BleConnectionStatus.authenticated);
     _pendingAuthCompleter?.complete(BleAuthOutcome.success);
     _pendingAuthCompleter = null;
-    _startRssiPolling(); // Begin live RSSI updates now that the session is fully up.
-    _startHeartbeat(); // Begin 100 ms heartbeat — Timer.periodic, fire-and-forget writes.
+    _startRssiPolling(); 
+    _startHeartbeat(); 
   }
 
   Future<BleAuthOutcome> authenticate({
@@ -651,17 +620,7 @@ class BleService {
     final authFuture = _pendingAuthCompleter!.future;
     _emit(BleConnectionStatus.authenticating);
 
-    // Establish a new encrypted session BEFORE sending credentials.
-    //
-    // beginSession() increments and persists the monotonic session counter so
-    // the 12-byte nonce [session_id || packet_counter] is unique across every
-    // reconnect, even after crashes or forced restarts.
-    //
-    // The PLC extracts the session ID from the nonce of this first packet and
-    // uses it for all subsequent response nonces — no separate handshake needed.
-    //
-    // endSession() first clears any state from a previous failed attempt so a
-    // retry always starts from a clean baseline.
+   
     BleCrypto.endSession();
     await BleCrypto.beginSession();
 
@@ -719,8 +678,7 @@ class BleService {
     );
 
     // ── Firmware capability check ───────────────────────────────────────────
-    // The ESP32 characteristic must declare PROPERTY_WRITE_NO_RESPONSE to
-    // enable ATT WRITE COMMAND (fire-and-forget, ~0 ms latency).
+  
 
     if (!useWithoutResponse) {
       _logger.w(
@@ -793,26 +751,14 @@ class BleService {
       debugPrint('[HB] HB dispatched (#$_hbDispatchCount)');
     }
 
-    // Encrypt through the shared AES-GCM pipeline so the global packet
-    // counter advances for every heartbeat tick, not only for control writes.
-    // The firmware uses the monotonically increasing counter across ALL
-    // characteristics to detect replay attacks and stale packets.
-    //
-    // BleCrypto._buildNonce() increments the counter *synchronously* before
-    // the first await, so a concurrent control write and a heartbeat tick
-    // dispatched in the same event-loop turn still receive distinct IVs.
+
     _encryptAndSendHeartbeat(char, useWithoutResponse).catchError((Object e) {
       _logger.w('Heartbeat write failed: $e');
       debugPrint('[HB] write error: $e');
     });
   }
 
-  /// Encrypts the heartbeat payload and writes it to [char].
-  ///
-  /// Re-checks [_heartbeatActive] and [_isDisposing] after the async gap so
-  /// a write is never attempted after disconnect or dispose has begun.
-  /// Any [StateError] from [BleCrypto.encrypt] (session ended mid-flight) is
-  /// caught by the [.catchError] at the call site in [_sendHeartbeatTick].
+  
   Future<void> _encryptAndSendHeartbeat(
     BluetoothCharacteristic char,
     bool useWithoutResponse,
@@ -821,8 +767,7 @@ class BleService {
     final wireBytes = _sessionAuthenticated
         ? await BleCrypto.encrypt(plainBytes)
         : plainBytes;
-    // Re-check after the async gap: disconnect may have occurred while the
-    // AES-GCM operation was in flight.
+    
     if (!_heartbeatActive || _isDisposing) return;
     await char.write(wireBytes, withoutResponse: useWithoutResponse);
   }

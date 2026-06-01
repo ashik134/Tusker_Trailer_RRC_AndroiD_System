@@ -29,12 +29,11 @@ class CraneController extends ChangeNotifier {
   BleConnectionState _transportConnState = BleConnectionState.initial();
   BleConnectionStatus _lastConnectionStatus = BleConnectionStatus.disconnected;
   List<BleScanDevice> _devices = const [];
-  
+
   PlcOutputCommand _activeCommand = PlcOutputCommand.idle();
 
-  // ── BLE write serializer ──────────────────────────────────────────────────
-  // Prevents BLE queue flooding when commands arrive faster than writes complete.
-  // Only one write is in flight at a time; the latest pending command wins.
+  // BLE write serializer
+
   bool _commandInFlight = false;
   List<int>? _pendingCommandBytes;
 
@@ -90,7 +89,7 @@ class CraneController extends ChangeNotifier {
   String? get sessionEmail => _sessionEmail;
   String? get errorMessage => _errorMessage ?? _transportConnState.message;
   List<BleScanDevice> get devices => _devices;
- 
+
   String get savedEmail => _savedEmail;
   String get savedPassword => _savedPassword;
   BleConnectionState get connectionState => _transportConnState;
@@ -110,11 +109,7 @@ class CraneController extends ChangeNotifier {
   bool get isAwaitingAuthentication =>
       _transportConnState.status == BleConnectionStatus.awaitingAuthentication;
 
-  
-  
-
-  // ── LED indicator states ─────────────────────────────────────────────────
-  // Emergency indicator must represent the active lockout condition only.
+  //  LED indicator states
   bool get ledEstop => _estopLatched;
   bool get ledUp => _activeCommand.up && !_activeCommand.estop;
   bool get ledDown => _activeCommand.down && !_activeCommand.estop;
@@ -123,11 +118,11 @@ class CraneController extends ChangeNotifier {
   bool get ledFast =>
       _activeCommand.speed == HoistSpeed.fast && !_activeCommand.estop;
 
-  // ── Connected device info ─────────────────────────────────────────────────
+  //  Connected device info
   String? get connectedDeviceName => _transportConnState.connectedDevice?.name;
   int? get connectedDeviceRssi => _transportConnState.connectedDevice?.rssi;
 
-  // ── Hoist state derived from active command ───────────────────────────────
+  //  Hoist state derived from active command
   HoistState get hoistState {
     if (_activeCommand.estop || _activeCommand.hasHorizontalMotion) {
       return HoistState.idle;
@@ -494,13 +489,10 @@ class CraneController extends ChangeNotifier {
   Future<void> disconnect() async {
     _errorMessage = null;
 
-    // Best-effort safe stop before disconnecting transport.
     if (isConnected && !_estopLatched) {
       try {
         await _sendCommand(PlcOutputCommand.idle());
-      } catch (_) {
-        // Ignore: transport teardown below remains the final safety path.
-      }
+      } catch (_) {}
     }
 
     await _bleService.disconnect();
@@ -510,17 +502,15 @@ class CraneController extends ChangeNotifier {
   Future<void> stopScan() async {
     _errorMessage = null;
     await _bleService.stopScan();
-    // State transitions via _connStateSubscription when startScan() resolves.
   }
 
-  // ── Command helpers ───────────────────────────────────────────────────────
+  // Command helpers
 
   Future<void> _sendCommand(PlcOutputCommand command) async {
     _activeCommand = command;
     notifyListeners();
     final bytes = command.wireBytes.toList();
     if (_commandInFlight) {
-      // Replace whatever was pending — latest command wins.
       _pendingCommandBytes = bytes;
       return;
     }
@@ -531,7 +521,7 @@ class CraneController extends ChangeNotifier {
     _commandInFlight = true;
     try {
       await _bleService.writeDigital(bytes);
-      // Drain at most one pending command queued while this write was in flight.
+
       final next = _pendingCommandBytes;
       _pendingCommandBytes = null;
       if (next != null) {
@@ -555,33 +545,26 @@ class CraneController extends ChangeNotifier {
     _activeCommand = cmd;
     notifyListeners();
     final bytes = cmd.wireBytes.toList();
-    // E-stop bypasses the serializer: preempts any pending command and sends
-    // immediately after the current in-flight write (or right now if idle).
+
     _pendingCommandBytes = bytes;
     if (!_commandInFlight) {
       final pending = _pendingCommandBytes!;
       _pendingCommandBytes = null;
       await _writeBytes(pending);
     }
-    // If a write is in flight it will drain _pendingCommandBytes next,
-    // ensuring the E-stop is the very next thing written.
   }
 
-  /// Immediately latches E-stop and terminates the BLE session.
-  /// Called when the device leaves foreground or a hardware safety button fires.
-  /// The caller does not need to await — fire-and-forget is safe here.
   Future<void> triggerSafeDisconnect() async {
     if (!isConnected) return;
-    // Latch state synchronously so the UI reflects the emergency immediately.
+
     _estopLatched = true;
     _deadmanHeld = false;
     _clearDirectionalHolds(notify: false);
     _activeCommand = PlcOutputCommand.emergencyStop();
-    // Discard any queued motion command so it cannot race the safe-state write.
+
     _pendingCommandBytes = null;
     notifyListeners();
-    // BleService.disconnect() writes emergencyStop wireBytes before tearing
-    // down the BLE link, giving the PLC one last chance to enter safe state.
+
     await _bleService.disconnect();
   }
 
@@ -592,7 +575,6 @@ class CraneController extends ChangeNotifier {
   }
 
   Future<void> setDeadmanHeld(bool held) async {
-    // E-stop always overrides deadman — block while emergency is active.
     if (_estopLatched) return;
     if (_deadmanHeld == held) return;
     _deadmanHeld = held;

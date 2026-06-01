@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import 'package:tusker_trailer_rrc/controllers/crane_controllers.dart';
 import 'package:tusker_trailer_rrc/models/ble_scan_device.dart';
+
 import 'package:tusker_trailer_rrc/services/ble_service.dart';
 import 'package:tusker_trailer_rrc/utils/constants.dart';
 
@@ -107,6 +108,7 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
           ],
         ),
         actions: [
+        
           Padding(
             padding: const EdgeInsets.only(right: 16),
             child: Container(
@@ -495,7 +497,7 @@ class _MiniStatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Calculate size based on screen width
+    
     final screenWidth = MediaQuery.of(context).size.width;
     final double cardWidth = screenWidth < 600 ? 110 : 140;
     final double cardHeight = screenWidth < 600 ? 65 : 75;
@@ -816,10 +818,10 @@ class _ConnectedDeviceCard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          // ── Device Info Row ──────────────────────────
+         
           Row(
             children: [
-              // Device icon
+           
               Container(
                 width: 48,
                 height: 48,
@@ -923,7 +925,7 @@ class _ConnectedDeviceCard extends StatelessWidget {
           if (!isConnecting) ...[
             const SizedBox(height: 14),
 
-            // ── RSSI Bar ────────────────────────────────
+            // ── RSSI Bar
             _RSSIBar(rssi: device.rssi),
 
             const SizedBox(height: 14),
