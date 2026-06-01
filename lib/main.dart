@@ -33,7 +33,6 @@ class TuskerRRCApp extends StatelessWidget {
         home: StartupSplashScreen(
           destinationBuilder: (_) => const CraneAppShell(),
         ),
-        routes: {'/connection': (_) => const CraneAppShell()},
       ),
     );
   }
