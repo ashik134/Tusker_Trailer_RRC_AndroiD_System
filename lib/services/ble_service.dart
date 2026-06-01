@@ -231,6 +231,21 @@ class BleService {
   // Discover services and map characteristics.
   Future<void> _discoverServices() async {
     try {
+      // Negotiate a larger ATT MTU before any characteristic writes.
+      // AES-GCM encrypted digital-characteristic payloads (nonce + ciphertext +
+      // tag, hex-encoded) reach ~78 bytes — well above the default 20-byte ATT
+      // payload.  Without explicit negotiation the Android BLE stack falls back
+      // to Prepare Write / Execute Write (long-write procedure), which is not
+      // guaranteed to be handled correctly by all ESP32 NimBLE configurations.
+      if (!kIsWeb && Platform.isAndroid) {
+        try {
+          final negotiatedMtu = await _device!.requestMtu(512);
+          debugPrint('[BLE] ATT MTU negotiated: $negotiatedMtu bytes');
+        } catch (e) {
+          _logger.w('MTU negotiation failed — proceeding with default MTU: $e');
+          debugPrint('[BLE] MTU negotiation failed: $e');
+        }
+      }
       final services = await _device!.discoverServices();
 
       BluetoothCharacteristic? digital;
@@ -513,6 +528,10 @@ class BleService {
       _pendingAuthCompleter?.complete(BleAuthOutcome.untrusted);
       _pendingAuthCompleter = null;
       _emit(BleConnectionStatus.error, message: payload);
+      // An untrusted device cannot authenticate by definition — close the
+      // session immediately so the BLE link does not remain open and occupy
+      // the PLC's single-operator slot, blocking legitimate reconnection.
+      unawaited(disconnect(emitState: false));
       return;
     }
 
@@ -841,9 +860,22 @@ class BleService {
 
   Future<void> writeDigital(List<int> bytes) async {
     if (_digitalChar == null) return;
-    final wireBytes = _sessionAuthenticated
-        ? await BleCrypto.encrypt(bytes)
-        : bytes;
+    final List<int> wireBytes;
+    if (_sessionAuthenticated) {
+      try {
+        wireBytes = await BleCrypto.encrypt(bytes);
+      } on BleCryptoException catch (e) {
+        _logger.e('Encryption failure on digital write: $e');
+        unawaited(_enterCryptoSafeState('BleCryptoException during encrypt: $e'));
+        return;
+      } on StateError catch (e) {
+        _logger.e('Crypto session state error on digital write: $e');
+        unawaited(_enterCryptoSafeState('StateError during encrypt: $e'));
+        return;
+      }
+    } else {
+      wireBytes = bytes;
+    }
     await _digitalChar!.write(wireBytes, withoutResponse: false);
   }
 
