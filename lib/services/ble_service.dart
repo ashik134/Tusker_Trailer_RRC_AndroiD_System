@@ -89,6 +89,13 @@ class BleService {
   // ── Continuous scan control ─────────────────────────────────────────────────
   bool _scanShouldContinue = false;
 
+  // ── Device cache — prevents list flicker between 8-second scan bursts ────────
+  final Map<String, BleScanDevice> _deviceCache = {};
+  final Map<String, DateTime> _deviceLastSeen = {};
+  Timer? _pruneTimer;
+  static const Duration _deviceStaleTimeout = Duration(seconds: 20);
+  static const Duration _pruneInterval = Duration(seconds: 5);
+
   static const int _safeStateMaxAttempts = 3;
   static const Duration _safeStateAckTimeout = Duration(milliseconds: 1200);
 
@@ -107,32 +114,62 @@ class BleService {
   // ── Scanning ───────────────────────────────────────────────────────────────
 
   Future<void> startScan() async {
-    await stopScan();
-    _scanController.add(const []);
+    // Stop the previous scan loop and subscription WITHOUT clearing the device
+    // cache. Cached devices are immediately re-emitted below so they appear
+    // on screen the instant SCAN is tapped, before BLE has had a chance to
+    // re-discover them (important with balanced scan mode).
+    _scanShouldContinue = false;
+    _pruneTimer?.cancel();
+    _pruneTimer = null;
+    if (FlutterBluePlus.isScanningNow) {
+      await FlutterBluePlus.stopScan();
+    }
+    await _scanResultsSub?.cancel();
+    _scanResultsSub = null;
+
     _emit(BleConnectionStatus.scanning);
     _scanShouldContinue = true;
 
+    // Re-emit the cache immediately so the UI shows previously seen devices.
+    if (_deviceCache.isNotEmpty) {
+      _scanController.add(List.unmodifiable(_deviceCache.values.toList()));
+    }
+
+    // Start pruning timer to remove devices that stop advertising.
+    _pruneTimer = Timer.periodic(_pruneInterval, (_) => _pruneStaleDevices());
+
     _scanResultsSub = FlutterBluePlus.scanResults.listen(
       (results) {
-        final seen = <String>{};
-        final devices = results
-            .where((result) {
-              final advertisedName = result.advertisementData.advName.trim();
-              final platformName = result.device.platformName.trim();
-              final resolvedName = advertisedName.isNotEmpty
-                  ? advertisedName
-                  : platformName;
+        final now = DateTime.now();
+        bool changed = false;
 
-              return resolvedName.isNotEmpty &&
-                  resolvedName.startsWith(BLEConstants.scanNamePrefix);
-            })
-            .map(BleScanDevice.fromScanResult)
-            .where((d) => seen.add(d.id))
-            .toList();
-        debugPrint(
-          'Scan update: ${devices.length} ${BLEConstants.scanNamePrefix}* device(s) found',
-        );
-        _scanController.add(List.unmodifiable(devices));
+        for (final result in results) {
+          final advertisedName = result.advertisementData.advName.trim();
+          final platformName = result.device.platformName.trim();
+          final resolvedName =
+              advertisedName.isNotEmpty ? advertisedName : platformName;
+
+          if (resolvedName.isEmpty ||
+              !resolvedName.startsWith(BLEConstants.scanNamePrefix)) {
+            continue;
+          }
+
+          final device = BleScanDevice.fromScanResult(result);
+          final existing = _deviceCache[device.id];
+          _deviceLastSeen[device.id] = now;
+
+          if (existing == null || existing.rssi != device.rssi) {
+            _deviceCache[device.id] = device;
+            changed = true;
+          }
+        }
+
+        if (changed) {
+          debugPrint(
+            'Scan update: ${_deviceCache.length} ${BLEConstants.scanNamePrefix}* device(s) in cache',
+          );
+          _scanController.add(List.unmodifiable(_deviceCache.values.toList()));
+        }
       },
       onError: (e) {
         _emit(
@@ -166,12 +203,33 @@ class BleService {
 
   Future<void> stopScan() async {
     _scanShouldContinue = false; // Break the continuous scan loop.
+    _pruneTimer?.cancel();
+    _pruneTimer = null;
+    _deviceCache.clear();
+    _deviceLastSeen.clear();
     await FlutterBluePlus.stopScan();
     _scanResultsSub?.cancel();
     _scanResultsSub = null;
     if (FlutterBluePlus.isScanningNow) {
       await FlutterBluePlus.stopScan();
     }
+  }
+
+  void _pruneStaleDevices() {
+    final now = DateTime.now();
+    final staleIds = _deviceLastSeen.entries
+        .where((e) => now.difference(e.value) > _deviceStaleTimeout)
+        .map((e) => e.key)
+        .toList();
+
+    if (staleIds.isEmpty) return;
+
+    for (final id in staleIds) {
+      _deviceCache.remove(id);
+      _deviceLastSeen.remove(id);
+    }
+    debugPrint('[BLE] Pruned ${staleIds.length} stale device(s) from cache.');
+    _scanController.add(List.unmodifiable(_deviceCache.values.toList()));
   }
 
   // ── Connection ─────────────────────────────────────────────────────────────

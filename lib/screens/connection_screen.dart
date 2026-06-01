@@ -1,11 +1,14 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
+
 import 'package:provider/provider.dart';
 
-import 'package:tusker_trailer_rrc/controllers/crane_controllers.dart';
-import 'package:tusker_trailer_rrc/models/ble_scan_device.dart';
-import 'package:tusker_trailer_rrc/screens/settings_screen.dart';
-import 'package:tusker_trailer_rrc/services/ble_service.dart';
 import 'package:tusker_trailer_rrc/utils/constants.dart';
+import 'package:tusker_trailer_rrc/models/ble_scan_device.dart';
+
+import 'package:tusker_trailer_rrc/services/ble_service.dart';
+import 'package:tusker_trailer_rrc/controllers/crane_controllers.dart';
+
+import 'package:tusker_trailer_rrc/screens/settings_screen.dart';
 
 class ConnectionScreen extends StatefulWidget {
   const ConnectionScreen({super.key});
@@ -85,64 +88,7 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
 
     return Scaffold(
       // backgroundColor: ConnectionColors.background,
-      appBar: AppBar(
-        // backgroundColor: ConnectionColors.surface,
-        elevation: 0,
-        titleSpacing: 16,
-        title: const Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Tusker HaulControl',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 1.1,
-                color: ConnectionColors.textPrimary,
-              ),
-            ),
-            Text(
-              'Trailer RRC - Connection',
-              style: TextStyle(fontSize: 11, color: ConnectionColors.textMuted),
-            ),
-          ],
-        ),
-        actions: [
-          IconButton(
-            tooltip: 'Device Settings',
-            icon: const Icon(
-              Icons.settings_rounded,
-              color: ConnectionColors.primary,
-              size: 22,
-            ),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => const SettingsScreen(),
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: ConnectionColors.primarySoft,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(
-                Icons.precision_manufacturing_rounded,
-                color: ConnectionColors.primary,
-                size: 22,
-              ),
-            ),
-          ),
-        ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-          child: Container(height: 1, color: ConnectionColors.divider),
-        ),
-      ),
+      
       body: controller.isInitializing
           ? const _InitializingView()
           : Container(
@@ -154,245 +100,340 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                 ),
               ),
               child: SafeArea(
-                top: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-                  child: Column(
-                    children: [
-                      _HeroStatusCard(controller: controller),
-                      const SizedBox(height: 12),
-                      _QuickStatusRow(controller: controller),
-                      const SizedBox(height: 12),
-                      Expanded(child: _DevicesPanel(controller: controller)),
-                      const SizedBox(height: 12),
-                      _BottomActionBar(controller: controller),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-    );
-  }
-}
-
-class _HeroStatusCard extends StatelessWidget {
-  const _HeroStatusCard({required this.controller});
-
-  final CraneController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    final status = _resolveStatus(controller);
-
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 250),
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-      decoration: BoxDecoration(
-        color: status.background,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: status.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.7),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: status.loading
-                    ? Padding(
-                        padding: const EdgeInsets.all(10),
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.2,
-                          color: status.primary,
-                        ),
-                      )
-                    : Icon(status.icon, color: status.primary, size: 22),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      status.title,
-                      style: TextStyle(
-                        color: status.primary,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      status.subtitle,
-                      style: const TextStyle(
-                        color: ConnectionColors.textSecondary,
-                        fontSize: 12.5,
-                        height: 1.35,
+                    _buildAppBar(controller),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                        child: Column(
+                          children: [
+                            _StatusBanner(controller: controller),
+                            const SizedBox(height: 12),
+                            _QuickStatusRow(controller: controller),
+                            const SizedBox(height: 12),
+                            Expanded(child: _DevicesPanel(controller: controller)),
+                          ],
+                        ),
                       ),
                     ),
                   ],
                 ),
               ),
-              Container(
-                width: 9,
-                height: 9,
-                decoration: BoxDecoration(
-                  color: status.primary,
-                  shape: BoxShape.circle,
-                ),
+            ),
+    );
+  }
+  // ═══════════════════════════════════════════════════════════
+  // App Bar
+  // ═══════════════════════════════════════════════════════════
+
+  Widget _buildAppBar(CraneController controller) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 12, 12, 12),
+      decoration: BoxDecoration(
+        color: ConnectionColors.surface,
+        border: const Border(bottom: BorderSide(color: ConnectionColors.divider)),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 4, offset: const Offset(0, 2)),
+        ],
+      ),
+      child: Row(
+        children: [
+          // Logo & Title
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [ConnectionColors.primary, Color(0xFF225A95)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
-            ],
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(color: ConnectionColors.primary.withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 3)),
+              ],
+            ),
+            child: const Icon(Icons.precision_manufacturing_rounded, color: Colors.white, size: 22),
           ),
-          if (status.actions.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Wrap(spacing: 8, runSpacing: 8, children: status.actions),
-          ],
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Tusker HaulControl',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: ConnectionColors.textPrimary, letterSpacing: -0.2),
+                ),
+                Text(
+                  'Trailer RRC · Device Connection',
+                  style: TextStyle(fontSize: 10.5, color: ConnectionColors.textSecondary.withOpacity(0.8)),
+                ),
+              ],
+            ),
+          ),
+
+          // Scan action button
+          _buildScanButton(controller),
+          const SizedBox(width: 4),
+
+          // Settings
+          Material(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            child: InkWell(
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen())),
+              borderRadius: BorderRadius.circular(10),
+              child: Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: ConnectionColors.surfaceAlt,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: ConnectionColors.border),
+                ),
+                child: const Icon(Icons.settings_rounded, color: ConnectionColors.textSecondary, size: 20),
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  _StatusCardModel _resolveStatus(CraneController controller) {
-    if (!controller.permissionsGranted) {
-      return _StatusCardModel(
-        primary: ConnectionColors.warning,
-        background: ConnectionColors.warningBg,
-        border: ConnectionColors.warningBorder,
-        icon: Icons.key_rounded,
-        title: 'Permissions Needed',
-        subtitle: 'Bluetooth permissions are required to discover PLC devices.',
-        actions: [
-          _StatusActionButton(
-            label: 'Open Settings',
-            color: ConnectionColors.warning,
-            onTap: controller.openSettings,
-          ),
-          _StatusActionButton(
-            label: 'Retry Permissions',
-            color: ConnectionColors.warning,
-            outlined: true,
-            onTap: controller.refreshPermissions,
-          ),
-        ],
-      );
-    }
+  Widget _buildScanButton(CraneController controller) {
+    final isScanning = controller.isScanning;
+    final isConnected = controller.isConnected;
+    final canScan = !controller.isConnecting && !isConnected && controller.bluetoothReady && controller.permissionsGranted;
 
-    if (!controller.bluetoothReady) {
-      return _StatusCardModel(
-        primary: ConnectionColors.scanning,
-        background: ConnectionColors.scanningBg,
-        border: ConnectionColors.scanningBorder,
-        icon: Icons.bluetooth_disabled_rounded,
-        title: 'Bluetooth Off',
-        subtitle:
-            'Turn on Bluetooth to scan for ${BLEConstants.scanNamePrefix}* devices.',
-        actions: [
-          _StatusActionButton(
-            label: 'Enable Bluetooth',
-            color: ConnectionColors.scanning,
-            onTap: controller.enableBluetooth,
-          ),
-        ],
-      );
-    }
-
-    if (controller.connectionState.status == BleConnectionStatus.error) {
-      return _StatusCardModel(
-        primary: ConnectionColors.error,
-        background: ConnectionColors.errorBg,
-        border: ConnectionColors.errorBorder,
-        icon: Icons.error_outline_rounded,
-        title: 'Connection Error',
-        subtitle:
-            controller.connectionState.message ??
-            'An unexpected error occurred.',
-      );
-    }
-
-    if (controller.isConnected) {
-      return _StatusCardModel(
-        primary: ConnectionColors.connected,
-        background: ConnectionColors.connectedBg,
-        border: ConnectionColors.connectedBorder,
-        icon: Icons.bluetooth_connected_rounded,
-        title: 'Session Active',
-        subtitle:
-            'Connected to ${controller.connectedDeviceName ?? BLEConstants.deviceName}. Continue to authentication.',
-        actions: [
-          _StatusActionButton(
-            label: 'Disconnect',
-            color: ConnectionColors.error,
-            outlined: true,
-            onTap: controller.disconnect,
-          ),
-        ],
-      );
-    }
-
-    if (controller.isConnecting) {
-      return _StatusCardModel(
-        primary: ConnectionColors.scanning,
-        background: ConnectionColors.scanningBg,
-        border: ConnectionColors.scanningBorder,
-        icon: Icons.bluetooth_searching_rounded,
-        title: 'Connecting',
-        subtitle:
-            'Linking to ${controller.connectionState.connectedDevice?.name ?? "device"}...',
-        loading: true,
-      );
-    }
-
-    if (controller.isScanning) {
-      return const _StatusCardModel(
-        primary: ConnectionColors.scanning,
-        background: ConnectionColors.scanningBg,
-        border: ConnectionColors.scanningBorder,
-        icon: Icons.radar_rounded,
-        title: 'Scanning',
-        subtitle: 'Searching for RRC_* controllers nearby.',
-        loading: true,
-      );
-    }
-
-    return const _StatusCardModel(
-      primary: ConnectionColors.neutral,
-      background: ConnectionColors.neutralBg,
-      border: ConnectionColors.neutralBorder,
-      icon: Icons.bluetooth_searching_rounded,
-      title: 'Ready to Scan',
-      subtitle: 'Tap scan to discover available crane controllers.',
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        height: 38,
+        child: isScanning
+            ? OutlinedButton.icon(
+                onPressed: controller.stopScan,
+                icon: const Icon(Icons.stop_rounded, size: 14),
+                label: const Text('STOP', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.8)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: ConnectionColors.error,
+                  side: BorderSide(color: ConnectionColors.error.withOpacity(0.5)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                ),
+              )
+            : FilledButton.icon(
+                onPressed: canScan ? controller.scanForDevices : null,
+                icon: Icon(
+                  isConnected ? Icons.check_circle_rounded : Icons.bluetooth_searching_rounded,
+                  size: 15,
+                ),
+                label: Text(
+                  isConnected ? 'ACTIVE' : 'SCAN',
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.8),
+                ),
+                style: FilledButton.styleFrom(
+                  backgroundColor: isConnected ? ConnectionColors.connected : ConnectionColors.primary,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: ConnectionColors.neutral.withOpacity(0.3),
+                  disabledForegroundColor: ConnectionColors.textMuted,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  elevation: isConnected ? 0 : 2,
+                  shadowColor: ConnectionColors.primary.withOpacity(0.4),
+                ),
+              ),
+      ),
     );
   }
 }
 
-class _StatusCardModel {
-  const _StatusCardModel({
-    required this.primary,
-    required this.background,
-    required this.border,
+class _BannerData {
+  const _BannerData({
     required this.icon,
     required this.title,
     required this.subtitle,
+    required this.color,
+    required this.bg,
+    required this.border,
     this.loading = false,
-    this.actions = const [],
   });
-
-  final Color primary;
-  final Color background;
-  final Color border;
   final IconData icon;
   final String title;
   final String subtitle;
+  final Color color;
+  final Color bg;
+  final Color border;
   final bool loading;
-  final List<Widget> actions;
 }
+
+class _StatusBanner extends StatelessWidget {
+  const _StatusBanner({required this.controller});
+  final CraneController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final d = _resolve(controller);
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOut,
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: d.bg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: d.border),
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 28,
+            height: 28,
+            child: d.loading
+                ? Padding(
+                    padding: const EdgeInsets.all(5),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: d.color,
+                    ),
+                  )
+                : Icon(d.icon, color: d.color, size: 20),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  d.title,
+                  style: TextStyle(
+                    color: d.color,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.1,
+                  ),
+                ),
+                if (d.subtitle.isNotEmpty) ...[
+                  const SizedBox(height: 1),
+                  Text(
+                    d.subtitle,
+                    style: const TextStyle(
+                      color: ConnectionColors.textSecondary,
+                      fontSize: 11.5,
+                      height: 1.3,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ],
+            ),
+          ),
+          Container(
+            width: 7,
+            height: 7,
+            margin: const EdgeInsets.only(left: 10),
+            decoration: BoxDecoration(
+              color: d.color,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: d.color.withAlpha(60),
+                  blurRadius: 4,
+                  spreadRadius: 1,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  _BannerData _resolve(CraneController c) {
+    if (!c.permissionsGranted) {
+      return const _BannerData(
+        icon: Icons.key_rounded,
+        title: 'Permissions Required',
+        subtitle: 'Bluetooth & location permissions are needed.',
+        color: ConnectionColors.warning,
+        bg: ConnectionColors.warningBg,
+        border: ConnectionColors.warningBorder,
+      );
+    }
+    if (!c.bluetoothReady) {
+      return _BannerData(
+        icon: Icons.bluetooth_disabled_rounded,
+        title: 'Bluetooth Off',
+        subtitle:
+            'Enable Bluetooth to discover ${BLEConstants.scanNamePrefix}* controllers.',
+        color: ConnectionColors.scanning,
+        bg: ConnectionColors.scanningBg,
+        border: ConnectionColors.scanningBorder,
+      );
+    }
+    if (c.connectionState.status == BleConnectionStatus.error) {
+      return _BannerData(
+        icon: Icons.error_outline_rounded,
+        title: 'Connection Error',
+        subtitle: c.connectionState.message ?? 'An unexpected error occurred.',
+        color: ConnectionColors.error,
+        bg: ConnectionColors.errorBg,
+        border: ConnectionColors.errorBorder,
+      );
+    }
+    if (c.isConnected) {
+      return _BannerData(
+        icon: Icons.bluetooth_connected_rounded,
+        title: 'Session Active',
+        subtitle:
+            'Connected to ${c.connectedDeviceName ?? BLEConstants.deviceName}.',
+        color: ConnectionColors.connected,
+        bg: ConnectionColors.connectedBg,
+        border: ConnectionColors.connectedBorder,
+      );
+    }
+    if (c.isConnecting) {
+      return _BannerData(
+        icon: Icons.bluetooth_searching_rounded,
+        title: 'Connecting',
+        subtitle:
+            'Linking to ${c.connectionState.connectedDevice?.name ?? "device"}...',
+        color: ConnectionColors.scanning,
+        bg: ConnectionColors.scanningBg,
+        border: ConnectionColors.scanningBorder,
+        loading: true,
+      );
+    }
+    if (c.isScanning) {
+      return _BannerData(
+        icon: Icons.radar_rounded,
+        title: 'Scanning',
+        subtitle:
+            'Searching for ${BLEConstants.scanNamePrefix}* controllers nearby.',
+        color: ConnectionColors.scanning,
+        bg: ConnectionColors.scanningBg,
+        border: ConnectionColors.scanningBorder,
+        loading: true,
+      );
+    }
+    return const _BannerData(
+      icon: Icons.bluetooth_searching_rounded,
+      title: 'Ready to Scan',
+      subtitle: 'Tap SCAN to discover available crane controllers.',
+      color: ConnectionColors.neutral,
+      bg: ConnectionColors.neutralBg,
+      border: ConnectionColors.neutralBorder,
+    );
+  }
+}
+
+
+
+
 
 class _StatusActionButton extends StatelessWidget {
   const _StatusActionButton({
@@ -562,13 +603,85 @@ class _MiniStatCard extends StatelessWidget {
   }
 }
 
-class _DevicesPanel extends StatelessWidget {
+class _Badge extends StatelessWidget {
+  const _Badge({
+    super.key,
+    required this.label,
+    required this.color,
+    required this.bg,
+    required this.border,
+  });
+
+  final String label;
+  final Color color;
+  final Color bg;
+  final Color border;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: border),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 9,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.4,
+          color: color,
+        ),
+      ),
+    );
+  }
+}
+
+class _DevicesPanel extends StatefulWidget {
   const _DevicesPanel({required this.controller});
 
   final CraneController controller;
 
   @override
+  State<_DevicesPanel> createState() => _DevicesPanelState();
+}
+
+class _DevicesPanelState extends State<_DevicesPanel>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _spinCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _spinCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 650),
+    );
+  }
+
+  @override
+  void dispose() {
+    _spinCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _onRefresh() async {
+    if (widget.controller.isScanning ||
+        widget.controller.isConnecting ||
+        widget.controller.isConnected) {
+      return;
+    }
+    await _spinCtrl.forward(from: 0);
+    widget.controller.scanForDevices();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final c = widget.controller;
+    final blocked = c.isScanning || c.isConnecting || c.isConnected;
+    final count = c.isConnected ? 1 : c.devices.length;
     return Container(
       decoration: BoxDecoration(
         color: ConnectionColors.surface,
@@ -580,49 +693,81 @@ class _DevicesPanel extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 const Text(
                   'NEARBY DEVICES',
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: 10.5,
                     fontWeight: FontWeight.w800,
-                    letterSpacing: 1.2,
+                    letterSpacing: 1.5,
                     color: ConnectionColors.textMuted,
                   ),
                 ),
+                const SizedBox(width: 8),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 200),
+                  child: c.isScanning
+                      ? const _Badge(
+                          key: ValueKey('scanning'),
+                          label: 'SCANNING',
+                          color: ConnectionColors.scanning,
+                          bg: ConnectionColors.scanningBg,
+                          border: ConnectionColors.scanningBorder,
+                        )
+                      : count > 0
+                      ? _Badge(
+                          key: ValueKey('count-$count'),
+                          label: '$count found',
+                          color: ConnectionColors.primary,
+                          bg: ConnectionColors.primarySoft,
+                          border: ConnectionColors.border,
+                        )
+                      : const SizedBox.shrink(key: ValueKey('none')),
+                ),
                 const Spacer(),
-                Text(
-                  _countLabel(controller),
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: ConnectionColors.textMuted,
+                Material(
+                  color: Colors.transparent,
+                  borderRadius: BorderRadius.circular(8),
+                  child: InkWell(
+                    onTap: blocked ? null : _onRefresh,
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: ConnectionColors.surface,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: ConnectionColors.border),
+                      ),
+                      child: Center(
+                        child: RotationTransition(
+                          turns: _spinCtrl,
+                          child: Icon(
+                            Icons.refresh_rounded,
+                            size: 15,
+                            color: blocked
+                                ? ConnectionColors.border
+                                : ConnectionColors.textMuted,
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ],
             ),
           ),
           const Divider(height: 1, color: ConnectionColors.divider),
-          Expanded(
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 250),
-              child: _buildBody(),
-            ),
-          ),
+          Expanded(child: _buildBody()),
         ],
       ),
     );
   }
 
-  String _countLabel(CraneController controller) {
-    if (controller.isConnected) return '1 connected';
-    if (controller.isConnecting) return 'connecting...';
-    return '${controller.devices.length} found';
-  }
-
   Widget _buildBody() {
-    if (controller.isConnected || controller.isConnecting) {
-      final device = controller.connectionState.connectedDevice;
+    if (widget.controller.isConnected || widget.controller.isConnecting) {
+      final device = widget.controller.connectionState.connectedDevice;
       if (device == null) {
         return const _EmptyDeviceState(
           key: ValueKey('empty-connected'),
@@ -635,29 +780,31 @@ class _DevicesPanel extends StatelessWidget {
         children: [
           _ConnectedDeviceCard(
             device: device,
-            isConnecting: controller.isConnecting,
-            onDisconnect: controller.disconnect,
+            isConnecting: widget.controller.isConnecting,
+            onDisconnect: widget.controller.disconnect,
           ),
         ],
       );
     }
 
-    if (controller.devices.isEmpty) {
+    if (widget.controller.devices.isEmpty) {
       return _EmptyDeviceState(
         key: const ValueKey('empty-idle'),
-        scanning: controller.isScanning,
+        scanning: widget.controller.isScanning,
       );
     }
 
     return ListView.separated(
       key: const ValueKey('devices-list'),
       padding: const EdgeInsets.all(14),
-      itemCount: controller.devices.length,
+      itemCount: widget.controller.devices.length,
       separatorBuilder: (_, index) => const SizedBox(height: 10),
       itemBuilder: (_, i) => _AvailableDeviceCard(
-        device: controller.devices[i],
-        connecting: controller.isConnecting,
-        onConnect: () => controller.connectToDevice(controller.devices[i]),
+        key: ValueKey(widget.controller.devices[i].id),
+        device: widget.controller.devices[i],
+        connecting: widget.controller.isConnecting,
+        onConnect: () =>
+            widget.controller.connectToDevice(widget.controller.devices[i]),
       ),
     );
   }
@@ -665,6 +812,7 @@ class _DevicesPanel extends StatelessWidget {
 
 class _AvailableDeviceCard extends StatelessWidget {
   const _AvailableDeviceCard({
+    super.key,
     required this.device,
     required this.connecting,
     required this.onConnect,
@@ -1214,8 +1362,14 @@ class _EmptyDeviceState extends StatelessWidget {
   }
 }
 
-class _BottomActionBar extends StatelessWidget {
-  const _BottomActionBar({required this.controller});
+
+
+// ═══════════════════════════════════════════════════════════
+// Compact scan / stop button for the AppBar
+// ═══════════════════════════════════════════════════════════
+
+class _ScanActionButton extends StatelessWidget {
+  const _ScanActionButton({required this.controller});
 
   final CraneController controller;
 
@@ -1225,77 +1379,63 @@ class _BottomActionBar extends StatelessWidget {
     final connecting = controller.isConnecting;
     final connected = controller.isConnected;
 
+    if (scanning) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        child: OutlinedButton.icon(
+          onPressed: controller.stopScan,
+          icon: const Icon(Icons.stop_circle_outlined, size: 16),
+          label: const Text('STOP'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: ConnectionColors.error,
+            side: BorderSide(color: ConnectionColors.error.withAlpha(180)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+            textStyle: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.6,
+            ),
+          ),
+        ),
+      );
+    }
+
     final canScan =
-        !scanning &&
         !connecting &&
         !connected &&
         controller.bluetoothReady &&
         controller.permissionsGranted;
 
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: ConnectionColors.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: ConnectionColors.border),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 12,
-            offset: const Offset(0, 6),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+      child: FilledButton.icon(
+        onPressed: canScan ? controller.scanForDevices : null,
+        icon: Icon(
+          connected
+              ? Icons.check_circle_outline_rounded
+              : Icons.bluetooth_searching_rounded,
+          size: 16,
+        ),
+        label: Text(connected ? 'ACTIVE' : 'SCAN'),
+        style: FilledButton.styleFrom(
+          backgroundColor: connected
+              ? ConnectionColors.connected
+              : ConnectionColors.primary,
+          foregroundColor: Colors.white,
+          disabledBackgroundColor: ConnectionColors.neutral,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
           ),
-        ],
-      ),
-      child: SizedBox(
-        width: double.infinity,
-        height: 52,
-        child: scanning
-            ? OutlinedButton.icon(
-                onPressed: controller.stopScan,
-                icon: const Icon(
-                  Icons.stop_circle_outlined,
-                  color: ConnectionColors.error,
-                ),
-                label: const Text(
-                  'STOP SCANNING',
-                  style: TextStyle(
-                    color: ConnectionColors.error,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.8,
-                  ),
-                ),
-                style: OutlinedButton.styleFrom(
-                  side: const BorderSide(color: ConnectionColors.error),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-              )
-            : FilledButton.icon(
-                onPressed: canScan ? controller.scanForDevices : null,
-                icon: Icon(
-                  connected
-                      ? Icons.check_circle_outline_rounded
-                      : Icons.bluetooth_searching_rounded,
-                ),
-                label: Text(
-                  connected ? 'SESSION ACTIVE' : 'SCAN FOR DEVICES',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.9,
-                  ),
-                ),
-                style: FilledButton.styleFrom(
-                  backgroundColor: connected
-                      ? ConnectionColors.connected
-                      : ConnectionColors.primary,
-                  foregroundColor: Colors.white,
-                  disabledBackgroundColor: ConnectionColors.neutral,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-              ),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+          textStyle: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.6,
+          ),
+        ),
       ),
     );
   }
