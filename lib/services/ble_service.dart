@@ -96,9 +96,6 @@ class BleService {
   static const Duration _deviceStaleTimeout = Duration(seconds: 20);
   static const Duration _pruneInterval = Duration(seconds: 5);
 
-  static const int _safeStateMaxAttempts = 3;
-  static const Duration _safeStateAckTimeout = Duration(milliseconds: 1200);
-
   void _emit(BleConnectionStatus status, {String? message}) {
     if (_isDisposing || _connectionController.isClosed) {
       return;
@@ -237,10 +234,16 @@ class BleService {
   Future<void> connect(BleScanDevice scanDevice) async {
     await stopScan();
     await disconnect(emitState: false);
-    _emit(BleConnectionStatus.connecting);
 
+    // Assign the target device BEFORE emitting 'connecting'.
+    // _emit() calls broadcast-stream listeners synchronously, so
+    // CraneController.connectionState.connectedDevice must already be
+    // populated when isConnecting first becomes true — otherwise the UI
+    // null-guard fires and shows an empty-device state for one frame.
     _connectedDevice = scanDevice;
     _device = scanDevice.device;
+    _emit(BleConnectionStatus.connecting);
+
     var hasreachedConnectedState = false;
 
     _connStateSub = _device!.connectionState.listen((state) {
@@ -492,37 +495,7 @@ class BleService {
     _statusController.add(command);
   }
 
-  Future<void> _sendSafeStateAndAwaitAck() async {
-    if (_digitalChar == null) {
-      throw StateError('Digital characteristic is not ready.');
-    }
 
-    Object? lastError;
-    for (var attempt = 1; attempt <= _safeStateMaxAttempts; attempt++) {
-      final ackCompleter = Completer<void>();
-      _pendingSafeStateCompleter = ackCompleter;
-      try {
-        await _sendSafeStateCommand();
-        await ackCompleter.future.timeout(_safeStateAckTimeout);
-        _logger.i('Safe-state synchronized with PLC on attempt $attempt.');
-        return;
-      } catch (error) {
-        lastError = error;
-        _logger.w(
-          'Safe-state sync attempt $attempt failed: ${error.toString()}',
-        );
-      } finally {
-        if (identical(_pendingSafeStateCompleter, ackCompleter)) {
-          _pendingSafeStateCompleter = null;
-        }
-      }
-    }
-
-    throw StateError(
-      'Failed to synchronize safe state with PLC after $_safeStateMaxAttempts attempts. '
-      '${lastError ?? ''}',
-    );
-  }
 
   Future<void> _sendSafeStatePreAuthBestEffort() async {
     if (_digitalChar == null) {

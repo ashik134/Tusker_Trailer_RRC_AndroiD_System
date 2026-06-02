@@ -130,6 +130,15 @@ class CraneController extends ChangeNotifier {
   bool get isAwaitingAuthentication =>
       _transportConnState.status == BleConnectionStatus.awaitingAuthentication;
 
+  /// True during any connection phase before navigation completes:
+  /// transport connecting, awaiting authentication, or mid-authentication.
+  /// Use this — not [isConnecting] — to gate UI and scan updates so the
+  /// device list and card never revert to idle state during the handshake.
+  bool get isConnectionActive =>
+      _transportConnState.status == BleConnectionStatus.connecting ||
+      _transportConnState.status == BleConnectionStatus.awaitingAuthentication ||
+      _transportConnState.status == BleConnectionStatus.authenticating;
+
   /// The unique permanent identity of this app installation, loaded at startup.
   /// Included in every authentication payload for PLC trusted-device validation.
   String get deviceId => _deviceId;
@@ -410,6 +419,12 @@ class CraneController extends ChangeNotifier {
     });
 
     _scanSubscription = _bleService.scanStream.listen((devices) {
+      // Don't clobber the device list while a connection is active — the UI
+      // shows the cached list alongside the connecting card so it must stay
+      // populated until the user explicitly disconnects.
+      // isConnectionActive covers connecting, awaitingAuthentication, and
+      // authenticating so the guard holds across the entire handshake.
+      if (isConnectionActive || isConnected) return;
       _devices = devices;
       notifyListeners();
     });

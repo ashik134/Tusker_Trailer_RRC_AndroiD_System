@@ -53,26 +53,59 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
               backgroundColor: ConnectionColors.error,
               margin: const EdgeInsets.all(16),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(14),
               ),
-              duration: const Duration(seconds: 3),
+              duration: const Duration(seconds: 4),
+              dismissDirection: DismissDirection.horizontal,
+              onVisible: () {},
               content: Row(
                 children: [
-                  const Icon(
-                    Icons.error_outline_rounded,
-                    color: Colors.white,
-                    size: 18,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      error,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                      ),
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withAlpha(51),
+                      shape: BoxShape.circle,
                     ),
+                    child: const Icon(
+                      Icons.error_outline_rounded,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'Connection Error',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          error,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Colors.white.withAlpha(230),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w400,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Icon(
+                    Icons.swipe_rounded,
+                    color: Colors.white.withAlpha(102),
+                    size: 16,
                   ),
                 ],
               ),
@@ -88,7 +121,6 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
 
     return Scaffold(
       // backgroundColor: ConnectionColors.background,
-      
       body: controller.isInitializing
           ? const _InitializingView()
           : Container(
@@ -112,7 +144,9 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                             const SizedBox(height: 12),
                             _QuickStatusRow(controller: controller),
                             const SizedBox(height: 12),
-                            Expanded(child: _DevicesPanel(controller: controller)),
+                            Expanded(
+                              child: _DevicesPanel(controller: controller),
+                            ),
                           ],
                         ),
                       ),
@@ -132,9 +166,15 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
       padding: const EdgeInsets.fromLTRB(20, 12, 12, 12),
       decoration: BoxDecoration(
         color: ConnectionColors.surface,
-        border: const Border(bottom: BorderSide(color: ConnectionColors.divider)),
+        border: const Border(
+          bottom: BorderSide(color: ConnectionColors.divider),
+        ),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 4, offset: const Offset(0, 2)),
+          BoxShadow(
+            color: Colors.black.withAlpha((0.03 * 255).toInt()),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
         ],
       ),
       child: Row(
@@ -151,10 +191,20 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
               ),
               borderRadius: BorderRadius.circular(12),
               boxShadow: [
-                BoxShadow(color: ConnectionColors.primary.withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 3)),
+                BoxShadow(
+                  color: ConnectionColors.primary.withAlpha(
+                    (0.3 * 255).toInt(),
+                  ),
+                  blurRadius: 1,
+                  offset: const Offset(1, 1),
+                ),
               ],
             ),
-            child: const Icon(Icons.precision_manufacturing_rounded, color: Colors.white, size: 22),
+            child: const Icon(
+              Icons.precision_manufacturing_rounded,
+              color: Colors.white,
+              size: 22,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -164,11 +214,21 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
               children: [
                 const Text(
                   'Tusker HaulControl',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: ConnectionColors.textPrimary, letterSpacing: -0.2),
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: ConnectionColors.textPrimary,
+                    letterSpacing: -0.2,
+                  ),
                 ),
                 Text(
                   'Trailer RRC · Device Connection',
-                  style: TextStyle(fontSize: 10.5, color: ConnectionColors.textSecondary.withOpacity(0.8)),
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    color: ConnectionColors.textSecondary.withAlpha(
+                      (0.8 * 255).toInt(),
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -183,7 +243,9 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
             color: Colors.transparent,
             borderRadius: BorderRadius.circular(10),
             child: InkWell(
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen())),
+              onTap: () => Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => const SettingsScreen())),
               borderRadius: BorderRadius.circular(10),
               child: Container(
                 width: 38,
@@ -193,7 +255,11 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: ConnectionColors.border),
                 ),
-                child: const Icon(Icons.settings_rounded, color: ConnectionColors.textSecondary, size: 20),
+                child: const Icon(
+                  Icons.settings_rounded,
+                  color: ConnectionColors.textSecondary,
+                  size: 20,
+                ),
               ),
             ),
           ),
@@ -205,7 +271,11 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
   Widget _buildScanButton(CraneController controller) {
     final isScanning = controller.isScanning;
     final isConnected = controller.isConnected;
-    final canScan = !controller.isConnecting && !isConnected && controller.bluetoothReady && controller.permissionsGranted;
+    final canScan =
+        !controller.isConnectionActive &&
+        !isConnected &&
+        controller.bluetoothReady &&
+        controller.permissionsGranted;
 
     return Padding(
       padding: const EdgeInsets.only(right: 8),
@@ -216,33 +286,60 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
             ? OutlinedButton.icon(
                 onPressed: controller.stopScan,
                 icon: const Icon(Icons.stop_rounded, size: 14),
-                label: const Text('STOP', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.8)),
+                label: const Text(
+                  'STOP',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.8,
+                  ),
+                ),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: ConnectionColors.error,
-                  side: BorderSide(color: ConnectionColors.error.withOpacity(0.5)),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  side: BorderSide(
+                    color: ConnectionColors.error.withAlpha(
+                      (0.5 * 255).toInt(),
+                    ),
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                 ),
               )
             : FilledButton.icon(
                 onPressed: canScan ? controller.scanForDevices : null,
                 icon: Icon(
-                  isConnected ? Icons.check_circle_rounded : Icons.bluetooth_searching_rounded,
+                  isConnected
+                      ? Icons.check_circle_rounded
+                      : Icons.bluetooth_searching_rounded,
                   size: 15,
                 ),
                 label: Text(
                   isConnected ? 'ACTIVE' : 'SCAN',
-                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.8),
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.8,
+                  ),
                 ),
                 style: FilledButton.styleFrom(
-                  backgroundColor: isConnected ? ConnectionColors.connected : ConnectionColors.primary,
+                  backgroundColor: isConnected
+                      ? ConnectionColors.connected
+                      : ConnectionColors.primary,
                   foregroundColor: Colors.white,
-                  disabledBackgroundColor: ConnectionColors.neutral.withOpacity(0.3),
+                  disabledBackgroundColor: ConnectionColors.neutral.withAlpha(
+                    (0.3 * 255).toInt(),
+                  ),
                   disabledForegroundColor: ConnectionColors.textMuted,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                   padding: const EdgeInsets.symmetric(horizontal: 14),
                   elevation: isConnected ? 0 : 2,
-                  shadowColor: ConnectionColors.primary.withOpacity(0.4),
+                  shadowColor: ConnectionColors.primary.withAlpha(
+                    (0.4 * 255).toInt(),
+                  ),
                 ),
               ),
       ),
@@ -365,7 +462,7 @@ class _StatusBanner extends StatelessWidget {
       );
     }
     if (!c.bluetoothReady) {
-      return _BannerData(
+      return const _BannerData(
         icon: Icons.bluetooth_disabled_rounded,
         title: 'Bluetooth Off',
         subtitle:
@@ -408,8 +505,20 @@ class _StatusBanner extends StatelessWidget {
         loading: true,
       );
     }
-    if (c.isScanning) {
+    if (c.isAwaitingAuthentication || c.isAuthenticating) {
       return _BannerData(
+        icon: Icons.lock_outline_rounded,
+        title: 'Preparing Authentication',
+        subtitle:
+            'Establishing secure session with ${c.connectedDeviceName ?? "device"}...',
+        color: ConnectionColors.scanning,
+        bg: ConnectionColors.scanningBg,
+        border: ConnectionColors.scanningBorder,
+        loading: true,
+      );
+    }
+    if (c.isScanning) {
+      return const _BannerData(
         icon: Icons.radar_rounded,
         title: 'Scanning',
         subtitle:
@@ -431,59 +540,6 @@ class _StatusBanner extends StatelessWidget {
   }
 }
 
-
-
-
-
-class _StatusActionButton extends StatelessWidget {
-  const _StatusActionButton({
-    required this.label,
-    required this.color,
-    required this.onTap,
-    this.outlined = false,
-  });
-
-  final String label;
-  final Color color;
-  final VoidCallback onTap;
-  final bool outlined;
-
-  @override
-  Widget build(BuildContext context) {
-    if (outlined) {
-      return OutlinedButton(
-        onPressed: onTap,
-        style: OutlinedButton.styleFrom(
-          foregroundColor: color,
-          side: BorderSide(color: color.withValues(alpha: 0.45)),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          minimumSize: Size.zero,
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-        ),
-        child: Text(label),
-      );
-    }
-
-    return FilledButton(
-      onPressed: onTap,
-      style: FilledButton.styleFrom(
-        backgroundColor: color,
-        foregroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        minimumSize: Size.zero,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-      ),
-      child: Text(label),
-    );
-  }
-}
-
 class _QuickStatusRow extends StatelessWidget {
   const _QuickStatusRow({required this.controller});
 
@@ -498,7 +554,7 @@ class _QuickStatusRow extends StatelessWidget {
             label: 'Devices',
             value: controller.isConnected
                 ? '1'
-                : controller.isConnecting
+                : controller.isConnectionActive
                 ? '...'
                 : '${controller.devices.length}',
             icon: Icons.memory_rounded,
@@ -669,7 +725,7 @@ class _DevicesPanelState extends State<_DevicesPanel>
 
   Future<void> _onRefresh() async {
     if (widget.controller.isScanning ||
-        widget.controller.isConnecting ||
+        widget.controller.isConnectionActive ||
         widget.controller.isConnected) {
       return;
     }
@@ -680,7 +736,7 @@ class _DevicesPanelState extends State<_DevicesPanel>
   @override
   Widget build(BuildContext context) {
     final c = widget.controller;
-    final blocked = c.isScanning || c.isConnecting || c.isConnected;
+    final blocked = c.isScanning || c.isConnectionActive || c.isConnected;
     final count = c.isConnected ? 1 : c.devices.length;
     return Container(
       decoration: BoxDecoration(
@@ -766,45 +822,83 @@ class _DevicesPanelState extends State<_DevicesPanel>
   }
 
   Widget _buildBody() {
-    if (widget.controller.isConnected || widget.controller.isConnecting) {
-      final device = widget.controller.connectionState.connectedDevice;
-      if (device == null) {
-        return const _EmptyDeviceState(
-          key: ValueKey('empty-connected'),
-          scanning: false,
+    final c = widget.controller;
+
+ 
+    final targetDevice = c.connectionState.connectedDevice;
+
+    if (c.isConnected || c.isConnectionActive) {
+      if (targetDevice == null) {
+  
+        final sorted = [...c.devices]..sort((a, b) => b.rssi.compareTo(a.rssi));
+        if (sorted.isEmpty) {
+          return const _EmptyDeviceState(
+            key: ValueKey('empty-guard'),
+            scanning: false,
+          );
+        }
+        return ListView.separated(
+          key: const ValueKey('guard-devices-list'),
+          padding: const EdgeInsets.all(14),
+          itemCount: sorted.length,
+          separatorBuilder: (_, _) => const SizedBox(height: 10),
+          itemBuilder: (_, i) => _AvailableDeviceCard(
+            key: ValueKey(sorted[i].id),
+            device: sorted[i],
+            connecting: true,
+            onConnect: () {},
+          ),
         );
       }
-      return ListView(
-        key: const ValueKey('connected-list'),
+
+      // All scanned devices except the target (already shown at top).
+      final others = c.devices.where((d) => d.id != targetDevice.id).toList();
+
+      return ListView.separated(
+        key: const ValueKey('connecting-list'),
         padding: const EdgeInsets.all(14),
-        children: [
-          _ConnectedDeviceCard(
-            device: device,
-            isConnecting: widget.controller.isConnecting,
-            onDisconnect: widget.controller.disconnect,
-          ),
-        ],
+        itemCount: 1 + others.length,
+        separatorBuilder: (_, _) => const SizedBox(height: 10),
+        itemBuilder: (_, i) {
+          if (i == 0) {
+            return _ConnectedDeviceCard(
+              key: ValueKey(targetDevice.id),
+              device: targetDevice,
+              isConnecting: c.isConnectionActive,
+              onDisconnect: c.disconnect,
+            );
+          }
+          final d = others[i - 1];
+          return _AvailableDeviceCard(
+            key: ValueKey(d.id),
+            device: d,
+            // Disable all other cards while a connection is in progress.
+            connecting: true,
+            onConnect: () {},
+          );
+        },
       );
     }
 
-    if (widget.controller.devices.isEmpty) {
+    // ── Idle / scanning state ──────────────────────────────────────────────
+    if (c.devices.isEmpty) {
       return _EmptyDeviceState(
         key: const ValueKey('empty-idle'),
-        scanning: widget.controller.isScanning,
+        scanning: c.isScanning,
       );
     }
 
+    final sorted = [...c.devices]..sort((a, b) => b.rssi.compareTo(a.rssi));
     return ListView.separated(
       key: const ValueKey('devices-list'),
       padding: const EdgeInsets.all(14),
-      itemCount: widget.controller.devices.length,
-      separatorBuilder: (_, index) => const SizedBox(height: 10),
+      itemCount: sorted.length,
+      separatorBuilder: (_, _) => const SizedBox(height: 10),
       itemBuilder: (_, i) => _AvailableDeviceCard(
-        key: ValueKey(widget.controller.devices[i].id),
-        device: widget.controller.devices[i],
-        connecting: widget.controller.isConnecting,
-        onConnect: () =>
-            widget.controller.connectToDevice(widget.controller.devices[i]),
+        key: ValueKey(sorted[i].id),
+        device: sorted[i],
+        connecting: false,
+        onConnect: () => c.connectToDevice(sorted[i]),
       ),
     );
   }
@@ -824,91 +918,92 @@ class _AvailableDeviceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: ConnectionColors.surfaceAlt,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: ConnectionColors.border),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: ConnectionColors.primarySoft,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(
-              Icons.developer_board_rounded,
-              color: ConnectionColors.primary,
-              size: 23,
-            ),
+    return AnimatedOpacity(
+      opacity: connecting ? 0.45 : 1.0,
+      duration: const Duration(milliseconds: 250),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: ConnectionColors.surfaceAlt,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: connecting
+                ? ConnectionColors.border.withAlpha(120)
+                : ConnectionColors.border,
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  device.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: ConnectionColors.textPrimary,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  device.id,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: ConnectionColors.textMuted,
-                    fontSize: 11,
-                    fontFamily: 'monospace',
-                  ),
-                ),
-                const SizedBox(height: 8),
-                _SignalPill(rssi: device.rssi, label: device.signalLabel),
-              ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: ConnectionColors.primarySoft,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(
+                Icons.developer_board_rounded,
+                color: ConnectionColors.primary,
+                size: 23,
+              ),
             ),
-          ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 92,
-            child: FilledButton(
-              onPressed: connecting ? null : onConnect,
-              style: FilledButton.styleFrom(
-                backgroundColor: ConnectionColors.primary,
-                foregroundColor: Colors.white,
-                disabledBackgroundColor: ConnectionColors.neutral,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                padding: const EdgeInsets.symmetric(vertical: 11),
-                textStyle: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.6,
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    device.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: ConnectionColors.textPrimary,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    device.id,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: ConnectionColors.textMuted,
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  _SignalPill(rssi: device.rssi, label: device.signalLabel),
+                ],
+              ),
+            ),
+            // Hide the connect button while another device is connecting.
+            if (!connecting) ...[
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 92,
+                child: FilledButton(
+                  onPressed: onConnect,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: ConnectionColors.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 11),
+                    textStyle: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                  child: const Text('CONNECT'),
                 ),
               ),
-              child: connecting
-                  ? const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white70,
-                      ),
-                    )
-                  : const Text('CONNECT'),
-            ),
-          ),
-        ],
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -956,8 +1051,9 @@ class _SignalPill extends StatelessWidget {
   }
 }
 
-class _ConnectedDeviceCard extends StatelessWidget {
+class _ConnectedDeviceCard extends StatelessWidget { // Dedicated card for the actively connected device, showing extra details and a disconnect action.
   const _ConnectedDeviceCard({
+    super.key,
     required this.device,
     required this.isConnecting,
     required this.onDisconnect,
@@ -970,18 +1066,16 @@ class _ConnectedDeviceCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: ConnectionColors.connectedBg,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: ConnectionColors.connectedBorder),
       ),
       child: Column(
         children: [
-          // ── Device Info Row ──────────────────────────
           Row(
             children: [
-              // Device icon
               Container(
                 width: 48,
                 height: 48,
@@ -1003,8 +1097,6 @@ class _ConnectedDeviceCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 14),
-
-              // Device details
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1034,7 +1126,6 @@ class _ConnectedDeviceCard extends StatelessWidget {
                   ],
                 ),
               ),
-
               // Status / Connecting indicator
               if (isConnecting)
                 const SizedBox(
@@ -1085,12 +1176,12 @@ class _ConnectedDeviceCard extends StatelessWidget {
           if (!isConnecting) ...[
             const SizedBox(height: 14),
 
-            // ── RSSI Bar ────────────────────────────────
+            // ── RSSI Bar 
             _RSSIBar(rssi: device.rssi),
 
             const SizedBox(height: 14),
 
-            // ── Disconnect Button ───────────────────────
+            // ── Disconnect Button 
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
@@ -1121,7 +1212,7 @@ class _ConnectedDeviceCard extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════
-// RSSI Bar — Clean visual signal indicator (no text labels)
+// RSSI Bar — Clean visual signal indicator
 // ═══════════════════════════════════════════════════════════
 
 class _RSSIBar extends StatelessWidget {
@@ -1129,8 +1220,6 @@ class _RSSIBar extends StatelessWidget {
 
   final int rssi;
 
-  // Normalize RSSI to 0.0–1.0 range
-  // -30 = excellent, -100 = very weak
   double get _signalStrength => ((rssi + 100) / 70).clamp(0.0, 1.0);
 
   int get _filledBars {
@@ -1158,7 +1247,6 @@ class _RSSIBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // Signal icon
           Container(
             width: 36,
             height: 36,
@@ -1173,7 +1261,6 @@ class _RSSIBar extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-
           // Signal bars
           Expanded(
             child: Column(
@@ -1186,7 +1273,6 @@ class _RSSIBar extends StatelessWidget {
                   children: List.generate(5, (index) {
                     final isFilled = index < _filledBars;
                     final barHeight = 6.0 + (index * 4.0);
-
                     return Container(
                       width: 8,
                       height: barHeight,
@@ -1201,7 +1287,6 @@ class _RSSIBar extends StatelessWidget {
                   }),
                 ),
                 const SizedBox(height: 4),
-                // RSSI value only (no text label)
                 Text(
                   '$rssi dBm',
                   style: TextStyle(
@@ -1215,9 +1300,7 @@ class _RSSIBar extends StatelessWidget {
               ],
             ),
           ),
-
           const SizedBox(width: 8),
-
           // Signal percentage
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1242,7 +1325,7 @@ class _RSSIBar extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════
-// Pulsing Dot (animated live indicator)
+// Pulsing Dot
 // ═══════════════════════════════════════════════════════════
 
 class _PulsingDot extends StatefulWidget {
@@ -1304,6 +1387,10 @@ class _PulsingDotState extends State<_PulsingDot>
   }
 }
 
+// ═══════════════════════════════════════════════════════════
+// Empty State View
+// ═══════════════════════════════════════════════════════════
+
 class _EmptyDeviceState extends StatelessWidget {
   const _EmptyDeviceState({required this.scanning, super.key});
 
@@ -1362,84 +1449,9 @@ class _EmptyDeviceState extends StatelessWidget {
   }
 }
 
-
-
 // ═══════════════════════════════════════════════════════════
-// Compact scan / stop button for the AppBar
+// Initializing View
 // ═══════════════════════════════════════════════════════════
-
-class _ScanActionButton extends StatelessWidget {
-  const _ScanActionButton({required this.controller});
-
-  final CraneController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    final scanning = controller.isScanning;
-    final connecting = controller.isConnecting;
-    final connected = controller.isConnected;
-
-    if (scanning) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-        child: OutlinedButton.icon(
-          onPressed: controller.stopScan,
-          icon: const Icon(Icons.stop_circle_outlined, size: 16),
-          label: const Text('STOP'),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: ConnectionColors.error,
-            side: BorderSide(color: ConnectionColors.error.withAlpha(180)),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
-            textStyle: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.6,
-            ),
-          ),
-        ),
-      );
-    }
-
-    final canScan =
-        !connecting &&
-        !connected &&
-        controller.bluetoothReady &&
-        controller.permissionsGranted;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-      child: FilledButton.icon(
-        onPressed: canScan ? controller.scanForDevices : null,
-        icon: Icon(
-          connected
-              ? Icons.check_circle_outline_rounded
-              : Icons.bluetooth_searching_rounded,
-          size: 16,
-        ),
-        label: Text(connected ? 'ACTIVE' : 'SCAN'),
-        style: FilledButton.styleFrom(
-          backgroundColor: connected
-              ? ConnectionColors.connected
-              : ConnectionColors.primary,
-          foregroundColor: Colors.white,
-          disabledBackgroundColor: ConnectionColors.neutral,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
-          textStyle: const TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 0.6,
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 class _InitializingView extends StatelessWidget {
   const _InitializingView();
