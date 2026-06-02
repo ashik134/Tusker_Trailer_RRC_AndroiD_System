@@ -648,17 +648,12 @@ class BleService {
   }
 
   Future<void> _finalizeAuthenticatedSession() async {
-    // Start the AES-128-GCM session NOW — after the PLC has confirmed AUTH_OK.
-    //
-    // beginSession() increments and persists the monotonic session counter so
-    // the 12-byte nonce [session_id || packet_counter] is unique across every
-    // reconnect, even after crashes or forced restarts.  This session is used
-    // exclusively for digital-characteristic writes (control commands).
-    //
-    // Auth and heartbeat characteristics use plain text; only digital char
-    // uses AES-128-GCM encryption, matching the ESP32 firmware architecture.
-    BleCrypto.endSession(); // Clear any stale state from a previous session.
-    await BleCrypto.beginSession();
+    // The AES-128-GCM session was started in authenticate() before the
+    // encrypted auth write, so the monotonic packet counter is already live.
+    // Only start it here as a fallback if authenticate() was somehow bypassed.
+    if (!BleCrypto.sessionActive) {
+      await BleCrypto.beginSession();
+    }
 
     if (!kIsWeb && Platform.isAndroid) {
       try {
@@ -670,7 +665,8 @@ class BleService {
         _logger.w('Could not set connection priority: $e');
       }
     }
-    // Mark the session live — AES-GCM encryption is now active for digital writes.
+    // Mark the session live — AES-GCM encryption is now active for all three
+    // characteristics: auth, digital, and heartbeat.
     _sessionAuthenticated = true;
     _emit(BleConnectionStatus.authenticated);
     _pendingAuthCompleter?.complete(BleAuthOutcome.success);
@@ -694,19 +690,23 @@ class BleService {
     final authFuture = _pendingAuthCompleter!.future;
     _emit(BleConnectionStatus.authenticating);
 
-    // Auth payload is sent as plain text — the ESP32 firmware's
-    // AuthCallbacks::onWrite parses it directly with std::string::find('|').
+    // Auth payload is AES-128-GCM encrypted (Flutter → PLC).
     //
-    // The AES-128-GCM session for digital-characteristic writes is NOT started
-    // here; it is started in _finalizeAuthenticatedSession() only after the
-    // PLC has confirmed AUTH_OK.  This matches the firmware architecture:
+    // The session is started here — before the write — so the nonce counter
+    // is consistent across auth, digital, and heartbeat characteristics.
+    // _finalizeAuthenticatedSession() reuses the active session instead of
+    // restarting it, preserving the monotonic packet counter.
     //
-    //   Auth char   → plain text both directions
-    //   Digital char → AES-128-GCM encrypted (Flutter → PLC only)
-    //   Heartbeat   → plain text "HB"
-    final plaintext = utf8.encode('$email|$password|$deviceId');
+    //   Auth char    → AES-128-GCM encrypted (Flutter → PLC)
+    //   Digital char → AES-128-GCM encrypted (Flutter → PLC)
+    //   Heartbeat    → AES-128-GCM encrypted (Flutter → PLC)
+    BleCrypto.endSession(); // Clear any stale state from a previous attempt.
+    await BleCrypto.beginSession();
 
-    await _authChar!.write(plaintext, withoutResponse: false);
+    final plaintext = utf8.encode('$email|$password|$deviceId');
+    final encryptedAuth = await BleCrypto.encrypt(plaintext);
+
+    await _authChar!.write(encryptedAuth, withoutResponse: false);
 
     try {
       return await authFuture.timeout(
@@ -764,28 +764,28 @@ class BleService {
     if (!_heartbeatActive || _isDisposing) return;
     final char = _heartbeatChar;
     if (char == null) return;
-    // Plain-text "HB" — fire-and-forget; never AES-GCM encrypted.
+    // AES-128-GCM encrypted heartbeat — fire-and-forget.
     _encryptAndSendHeartbeat(char, useWithoutResponse).catchError((Object e) {
       _logger.w('Heartbeat write failed: $e');
     });
   }
 
-  /// Encrypts the heartbeat payload and writes it to [char].
+  /// Encrypts the heartbeat payload with AES-128-GCM and writes it to [char].
   ///
-  /// Sends the plain-text heartbeat payload to [char].
+  /// The "HB" payload is encrypted using the active [BleCrypto] session before
+  /// transmission. The packet counter is incremented on every call, so each
+  /// heartbeat nonce is unique within the session.
   ///
-  /// The ESP32 firmware's HeartbeatCallbacks::onWrite expects exactly the
-  /// two-byte UTF-8 string "HB". Any other value — including AES-GCM
-  /// ciphertext — is explicitly rejected. Heartbeats are never encrypted.
-  ///
-  /// Re-checks [_heartbeatActive] and [_isDisposing] before writing so a
-  /// write is never attempted after disconnect or dispose has begun.
+  /// Re-checks [_heartbeatActive] and [_isDisposing] before and after
+  /// encryption so a write is never attempted after disconnect or dispose.
   Future<void> _encryptAndSendHeartbeat(
     BluetoothCharacteristic char,
     bool useWithoutResponse,
   ) async {
-    // Plain text "HB" — firmware expects exactly this, no AES-GCM.
-    final wireBytes = utf8.encode(BLEConstants.heartbeatPayload);
+    if (!_heartbeatActive || _isDisposing) return;
+    final wireBytes = await BleCrypto.encrypt(
+      utf8.encode(BLEConstants.heartbeatPayload),
+    );
     if (!_heartbeatActive || _isDisposing) return;
     await char.write(wireBytes, withoutResponse: useWithoutResponse);
   }
