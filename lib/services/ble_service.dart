@@ -79,6 +79,11 @@ class BleService {
   // Digital-characteristic writes are AES-128-GCM encrypted while this is true.
   bool _sessionAuthenticated = false;
 
+  // True if the digital characteristic supports ATT WRITE COMMAND (no ACK needed).
+  // Enables fire-and-forget control writes for minimal latency (~1 connection interval
+  // vs ~2 round-trips with ATT WRITE REQUEST). Set during service discovery.
+  bool _digitalCharWriteNoResponse = false;
+
   // ── Live RSSI polling ───────────────────────────────────────────────────────
   Timer? _rssiTimer;
 
@@ -317,6 +322,7 @@ class BleService {
 
       _statusChar = null;
       _heartbeatChar = null; // reset before each discovery pass
+      _digitalCharWriteNoResponse = false;
 
       for (final service in services) {
         if (service.uuid.toString().toLowerCase() !=
@@ -334,6 +340,7 @@ class BleService {
           );
           if (uuid == BLEConstants.digitalCharUuid.toLowerCase()) {
             digital = char;
+            _digitalCharWriteNoResponse = char.properties.writeWithoutResponse;
           } else if (uuid == BLEConstants.authCharUuid.toLowerCase()) {
             auth = char;
           } else if (uuid == BLEConstants.statusCharUuid.toLowerCase()) {
@@ -364,6 +371,16 @@ class BleService {
       _authChar = auth;
       _statusChar = status;
       // _heartbeatChar was assigned inline above (optional — no error if absent).
+
+      if (!_digitalCharWriteNoResponse) {
+        _logger.w(
+          'Digital characteristic does not support writeWithoutResponse — '
+          'control writes will use ATT WRITE REQUEST (with ACK, ~15–40 ms '
+          'round-trip per command). Add PROPERTY_WRITE_NO_RESPONSE to the '
+          'ESP32 digital characteristic declaration to restore low-latency '
+          'fire-and-forget control.',
+        );
+      }
       if (_heartbeatChar == null) {
         debugPrint(
           '[BLE] WARNING: Heartbeat characteristic NOT found '
@@ -482,9 +499,6 @@ class BleService {
 
   void _handleStatusNotification(List<int> bytes) {
     final command = PlcOutputCommand.fromStatusNotification(bytes);
-    _logger.i(
-      'PLC status: estop=${command.estop} up=${command.up} down=${command.down} left=${command.left} right=${command.right}',
-    );
     if (command.estop || command.isIdle) {
       final pending = _pendingSafeStateCompleter;
       if (pending != null && !pending.isCompleted) {
@@ -718,109 +732,41 @@ class BleService {
 
   // ── Heartbeat helpers ─────────────────────────────────────────────────────
 
-  int _hbTickCount = 0;
-  int _hbDispatchCount = 0;
-
-  DateTime? _hbLastTickTime;
-
-  DateTime? _hbLastDispatchTime;
-
   void _startHeartbeat() {
     _stopHeartbeat();
     if (_heartbeatChar == null) {
       _logger.w('Heartbeat characteristic not found — heartbeat disabled.');
-      debugPrint('[HB] ERROR: _heartbeatChar is null — heartbeat NOT started.');
       return;
     }
 
     final bool useWithoutResponse =
         _heartbeatChar!.properties.writeWithoutResponse;
-    debugPrint(
-      '[HB] Heartbeat started — interval=50ms '
-      'writeWithoutResponse=$useWithoutResponse',
-    );
-
-    // ── Firmware capability check ───────────────────────────────────────────
-    // The ESP32 characteristic must declare PROPERTY_WRITE_NO_RESPONSE to
-    // enable ATT WRITE COMMAND (fire-and-forget, ~0 ms latency).
-
     if (!useWithoutResponse) {
       _logger.w(
-        'HB: ESP32 characteristic declares PROPERTY_WRITE only — '
-        'using ATT WRITE REQUEST (with ACK, ~15 ms round-trip). '
-        'Add PROPERTY_WRITE_NO_RESPONSE to the firmware characteristic '
-        'to enable fire-and-forget writes and eliminate Android '
-        'main-thread timing sensitivity.',
-      );
-      debugPrint(
-        '[HB] ⚠ writeWithoutResponse=false — '
-        'FIRMWARE ACTION REQUIRED: add '
-        'BLECharacteristic::PROPERTY_WRITE_NO_RESPONSE to the '
-        'heartbeat characteristic declaration on the ESP32.',
+        'HB: ESP32 heartbeat characteristic does not support '
+        'writeWithoutResponse — using ATT WRITE REQUEST (~15 ms round-trip). '
+        'Declare PROPERTY_WRITE_NO_RESPONSE on the ESP32 heartbeat '
+        'characteristic to enable fire-and-forget writes.',
       );
     }
 
     _heartbeatActive = true;
-    _hbTickCount = 0;
-    _hbDispatchCount = 0;
-    _hbLastTickTime = null;
-    _hbLastDispatchTime = null;
-
     _heartbeatTimer = Timer.periodic(
       SafetyConstants.heartbeatInterval,
       (_) => _sendHeartbeatTick(useWithoutResponse),
     );
   }
 
+  // Hot path — called every 50 ms. Keep this method lean: no allocations,
+  // no logging, no DateTime calls. Any overhead here directly adds to the
+  // Dart event-loop latency visible as sluggish control response.
   void _sendHeartbeatTick(bool useWithoutResponse) {
     if (!_heartbeatActive || _isDisposing) return;
     final char = _heartbeatChar;
     if (char == null) return;
-
-    final now = DateTime.now();
-    _hbTickCount++;
-
-    // ── Interval measurement (every tick) ──────────────────────────────────
-    final prev = _hbLastTickTime;
-    _hbLastTickTime = now;
-    if (prev != null) {
-      final intervalMs = now.difference(prev).inMilliseconds;
-      final label = (intervalMs > 130 || intervalMs < 70)
-          ? '[HB] ⚠ INTERVAL'
-          : '[HB] interval';
-      debugPrint('$label = ${intervalMs}ms (tick #$_hbTickCount)');
-      if (intervalMs > 130 || intervalMs < 70) {
-        _logger.w(
-          'HB timer interval anomaly: ${intervalMs}ms (expected ~100ms)',
-        );
-      }
-    }
-
-    // ── Dispatch throttle (time-based) ─────────────────────────────────────
-    final lastDispatch = _hbLastDispatchTime;
-    if (lastDispatch != null) {
-      final msSince = now.difference(lastDispatch).inMilliseconds;
-      if (msSince < 50) {
-        debugPrint(
-          '[HB] tick #$_hbTickCount throttled (${msSince}ms since last dispatch)',
-        );
-        return;
-      }
-    }
-
-    // ── Dispatch ───────────────────────────────────────────────────────────
-    _hbLastDispatchTime = now;
-    _hbDispatchCount++;
-    if (_hbDispatchCount <= 5 || _hbDispatchCount % 10 == 0) {
-      debugPrint('[HB] HB dispatched (#$_hbDispatchCount)');
-    }
-
-    // Send plain-text "HB" — the ESP32 firmware expects exactly this string.
-    // Heartbeats are never AES-GCM encrypted; only the digital characteristic
-    // (control commands) uses encryption.
+    // Plain-text "HB" — fire-and-forget; never AES-GCM encrypted.
     _encryptAndSendHeartbeat(char, useWithoutResponse).catchError((Object e) {
       _logger.w('Heartbeat write failed: $e');
-      debugPrint('[HB] write error: $e');
     });
   }
 
@@ -848,8 +794,6 @@ class BleService {
     _heartbeatActive = false;
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
-    _hbLastTickTime = null;
-    _hbLastDispatchTime = null;
   }
 
   // ── Live RSSI helpers ─────────────────────────────────────────────────────
@@ -907,7 +851,7 @@ class BleService {
     } else {
       wireBytes = bytes;
     }
-    await _digitalChar!.write(wireBytes, withoutResponse: false);
+    await _digitalChar!.write(wireBytes, withoutResponse: _digitalCharWriteNoResponse);
   }
 
   Future<void> writeAuth(List<int> bytes) async {
