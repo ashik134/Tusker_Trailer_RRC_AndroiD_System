@@ -815,7 +815,33 @@ class _DevicesPanelState extends State<_DevicesPanel>
             ),
           ),
           const Divider(height: 1, color: ConnectionColors.divider),
-          Expanded(child: _buildBody()),
+          Expanded(
+            child: Stack(
+              children: [
+                ShaderMask(
+                  shaderCallback: (Rect bounds) {
+                    return LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.white.withAlpha(
+                          100,
+                        ), 
+                        Colors.white.withAlpha(255), // Bottom: fully visible
+                      ],
+                    ).createShader(bounds);
+                  },
+                  blendMode: BlendMode.dstOut,
+                  child: const Image(
+                    image: AssetImage('assets/images/app_icon1.png'),
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                // assetImages('assets/images/app_icon1.png',filterQuality: FilterQuality.high, fit: BoxFit.cover,),
+                _buildBody(),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -824,12 +850,10 @@ class _DevicesPanelState extends State<_DevicesPanel>
   Widget _buildBody() {
     final c = widget.controller;
 
- 
     final targetDevice = c.connectionState.connectedDevice;
 
     if (c.isConnected || c.isConnectionActive) {
       if (targetDevice == null) {
-  
         final sorted = [...c.devices]..sort((a, b) => b.rssi.compareTo(a.rssi));
         if (sorted.isEmpty) {
           return const _EmptyDeviceState(
@@ -1051,7 +1075,8 @@ class _SignalPill extends StatelessWidget {
   }
 }
 
-class _ConnectedDeviceCard extends StatelessWidget { // Dedicated card for the actively connected device, showing extra details and a disconnect action.
+class _ConnectedDeviceCard extends StatelessWidget {
+  // Dedicated card for the actively connected device, showing extra details and a disconnect action.
   const _ConnectedDeviceCard({
     super.key,
     required this.device,
@@ -1176,12 +1201,12 @@ class _ConnectedDeviceCard extends StatelessWidget { // Dedicated card for the a
           if (!isConnecting) ...[
             const SizedBox(height: 14),
 
-            // ── RSSI Bar 
+            // ── RSSI Bar
             _RSSIBar(rssi: device.rssi),
 
             const SizedBox(height: 14),
 
-            // ── Disconnect Button 
+            // ── Disconnect Button
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
@@ -1404,22 +1429,22 @@ class _EmptyDeviceState extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Container(
-              width: 74,
-              height: 74,
-              decoration: BoxDecoration(
-                color: ConnectionColors.primarySoft,
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: ConnectionColors.border),
-              ),
-              child: Icon(
-                scanning ? Icons.radar_rounded : Icons.bluetooth_rounded,
-                color: scanning
-                    ? ConnectionColors.scanning
-                    : ConnectionColors.textMuted,
-                size: 36,
-              ),
-            ),
+            // Container(
+            //   width: 74,
+            //   height: 74,
+            //   decoration: BoxDecoration(
+            //     color: ConnectionColors.primarySoft,
+            //     borderRadius: BorderRadius.circular(24),
+            //     border: Border.all(color: ConnectionColors.border),
+            //   ),
+            //   child: Icon(
+            //     scanning ? Icons.radar_rounded : Icons.bluetooth_rounded,
+            //     color: scanning
+            //         ? ConnectionColors.scanning
+            //         : ConnectionColors.textMuted,
+            //     size: 36,
+            //   ),
+            // ),
             const SizedBox(height: 14),
             Text(
               scanning ? 'Scanning for Devices...' : 'No Controllers Found',
