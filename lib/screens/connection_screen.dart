@@ -9,6 +9,7 @@ import 'package:tusker_trailer_rrc/models/ble_connection_state.dart';
 import 'package:tusker_trailer_rrc/controllers/crane_controllers.dart';
 
 import 'package:tusker_trailer_rrc/screens/settings_screen.dart';
+import 'package:tusker_trailer_rrc/widgets/device_card.dart';
 
 class ConnectionScreen extends StatefulWidget {
   const ConnectionScreen({super.key});
@@ -824,9 +825,7 @@ class _DevicesPanelState extends State<_DevicesPanel>
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
                       colors: [
-                        Colors.white.withAlpha(
-                          100,
-                        ), 
+                        Colors.white.withAlpha(100),
                         Colors.white.withAlpha(255), // Bottom: fully visible
                       ],
                     ).createShader(bounds);
@@ -866,7 +865,7 @@ class _DevicesPanelState extends State<_DevicesPanel>
           padding: const EdgeInsets.all(14),
           itemCount: sorted.length,
           separatorBuilder: (_, _) => const SizedBox(height: 10),
-          itemBuilder: (_, i) => _AvailableDeviceCard(
+          itemBuilder: (_, i) => AvailableDeviceCard(
             key: ValueKey(sorted[i].id),
             device: sorted[i],
             connecting: true,
@@ -885,7 +884,7 @@ class _DevicesPanelState extends State<_DevicesPanel>
         separatorBuilder: (_, _) => const SizedBox(height: 10),
         itemBuilder: (_, i) {
           if (i == 0) {
-            return _ConnectedDeviceCard(
+            return ConnectedDeviceCard(
               key: ValueKey(targetDevice.id),
               device: targetDevice,
               isConnecting: c.isConnectionActive,
@@ -893,7 +892,7 @@ class _DevicesPanelState extends State<_DevicesPanel>
             );
           }
           final d = others[i - 1];
-          return _AvailableDeviceCard(
+          return AvailableDeviceCard(
             key: ValueKey(d.id),
             device: d,
             // Disable all other cards while a connection is in progress.
@@ -918,7 +917,7 @@ class _DevicesPanelState extends State<_DevicesPanel>
       padding: const EdgeInsets.all(14),
       itemCount: sorted.length,
       separatorBuilder: (_, _) => const SizedBox(height: 10),
-      itemBuilder: (_, i) => _AvailableDeviceCard(
+      itemBuilder: (_, i) => AvailableDeviceCard(
         key: ValueKey(sorted[i].id),
         device: sorted[i],
         connecting: false,
@@ -928,489 +927,11 @@ class _DevicesPanelState extends State<_DevicesPanel>
   }
 }
 
-class _AvailableDeviceCard extends StatelessWidget {
-  const _AvailableDeviceCard({
-    super.key,
-    required this.device,
-    required this.connecting,
-    required this.onConnect,
-  });
 
-  final BleScanDevice device;
-  final bool connecting;
-  final VoidCallback onConnect;
 
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedOpacity(
-      opacity: connecting ? 0.45 : 1.0,
-      duration: const Duration(milliseconds: 250),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: ConnectionColors.surfaceAlt,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: connecting
-                ? ConnectionColors.border.withAlpha(120)
-                : ConnectionColors.border,
-          ),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: ConnectionColors.primarySoft,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(
-                Icons.developer_board_rounded,
-                color: ConnectionColors.primary,
-                size: 23,
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    device.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: ConnectionColors.textPrimary,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    device.id,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: ConnectionColors.textMuted,
-                      fontSize: 11,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  _SignalPill(rssi: device.rssi, label: device.signalLabel),
-                ],
-              ),
-            ),
-            // Hide the connect button while another device is connecting.
-            if (!connecting) ...[
-              const SizedBox(width: 8),
-              SizedBox(
-                width: 92,
-                child: FilledButton(
-                  onPressed: onConnect,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: ConnectionColors.primary,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 11),
-                    textStyle: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.6,
-                    ),
-                  ),
-                  child: const Text('CONNECT'),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
 
-class _SignalPill extends StatelessWidget {
-  const _SignalPill({required this.rssi, required this.label});
 
-  final int rssi;
-  final String label;
 
-  @override
-  Widget build(BuildContext context) {
-    final tone = rssi >= -68
-        ? ConnectionColors.connected
-        : rssi >= -80
-        ? ConnectionColors.warning
-        : ConnectionColors.error;
-
-    return Row(
-      children: [
-        Expanded(
-          child: Text(
-            '$rssi dBm ',
-            style: TextStyle(
-              color: tone,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        // SizedBox(
-        //   width: 36,
-        //   child: LinearProgressIndicator(
-        //     value: barValue,
-        //     minHeight: 4,
-        //     borderRadius: BorderRadius.circular(4),
-        //     backgroundColor: tone.withValues(alpha: 0.22),
-        //     valueColor: AlwaysStoppedAnimation<Color>(tone),
-        //   ),
-        // ),
-      ],
-    );
-  }
-}
-
-class _ConnectedDeviceCard extends StatelessWidget {
-  // Dedicated card for the actively connected device, showing extra details and a disconnect action.
-  const _ConnectedDeviceCard({
-    super.key,
-    required this.device,
-    required this.isConnecting,
-    required this.onDisconnect,
-  });
-
-  final BleScanDevice device;
-  final bool isConnecting;
-  final VoidCallback onDisconnect;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: ConnectionColors.connectedBg,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: ConnectionColors.connectedBorder),
-      ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(14),
-                  boxShadow: [
-                    BoxShadow(
-                      color: ConnectionColors.connected.withAlpha(30),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: const Icon(
-                  Icons.developer_board_rounded,
-                  color: ConnectionColors.connected,
-                  size: 24,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      device.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: ConnectionColors.textPrimary,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.2,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      device.id,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: ConnectionColors.textMuted,
-                        fontSize: 11,
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              // Status / Connecting indicator
-              if (isConnecting)
-                const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2.5,
-                    color: ConnectionColors.scanning,
-                  ),
-                )
-              else
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: ConnectionColors.connected.withAlpha(25),
-                        blurRadius: 4,
-                        offset: const Offset(0, 1),
-                      ),
-                    ],
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _PulsingDot(size: 7, color: ConnectionColors.connected),
-                      SizedBox(width: 6),
-                      Text(
-                        'LIVE',
-                        style: TextStyle(
-                          color: ConnectionColors.connected,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.8,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-
-          if (!isConnecting) ...[
-            const SizedBox(height: 14),
-
-            // ── RSSI Bar
-            _RSSIBar(rssi: device.rssi),
-
-            const SizedBox(height: 14),
-
-            // ── Disconnect Button
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: onDisconnect,
-                icon: const Icon(Icons.bluetooth_disabled_rounded, size: 16),
-                label: const Text('DISCONNECT'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: ConnectionColors.error,
-                  side: BorderSide(color: ConnectionColors.error.withAlpha(80)),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  textStyle: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.8,
-                  ),
-                  backgroundColor: ConnectionColors.error.withAlpha(10),
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════
-// RSSI Bar — Clean visual signal indicator
-// ═══════════════════════════════════════════════════════════
-
-class _RSSIBar extends StatelessWidget {
-  const _RSSIBar({required this.rssi});
-
-  final int rssi;
-
-  double get _signalStrength => ((rssi + 100) / 70).clamp(0.0, 1.0);
-
-  int get _filledBars {
-    if (_signalStrength >= 0.85) return 5;
-    if (_signalStrength >= 0.65) return 4;
-    if (_signalStrength >= 0.45) return 3;
-    if (_signalStrength >= 0.25) return 2;
-    if (_signalStrength >= 0.1) return 1;
-    return 0;
-  }
-
-  Color get _signalColor {
-    if (_signalStrength >= 0.65) return ConnectionColors.connected;
-    if (_signalStrength >= 0.35) return ConnectionColors.warning;
-    return ConnectionColors.error;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: _signalColor.withAlpha(20),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(
-              Icons.signal_cellular_alt_rounded,
-              color: _signalColor,
-              size: 18,
-            ),
-          ),
-          const SizedBox(width: 12),
-          // Signal bars
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Bars row
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: List.generate(5, (index) {
-                    final isFilled = index < _filledBars;
-                    final barHeight = 6.0 + (index * 4.0);
-                    return Container(
-                      width: 8,
-                      height: barHeight,
-                      margin: const EdgeInsets.only(right: 4),
-                      decoration: BoxDecoration(
-                        color: isFilled
-                            ? _signalColor
-                            : ConnectionColors.border.withAlpha(150),
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    );
-                  }),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '$rssi dBm',
-                  style: TextStyle(
-                    color: _signalColor,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    fontFamily: 'monospace',
-                    letterSpacing: 0.3,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          // Signal percentage
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: _signalColor.withAlpha(20),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              '${(_signalStrength * 100).toInt()}%',
-              style: TextStyle(
-                color: _signalColor,
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════
-// Pulsing Dot
-// ═══════════════════════════════════════════════════════════
-
-class _PulsingDot extends StatefulWidget {
-  const _PulsingDot({required this.size, required this.color});
-
-  final double size;
-  final Color color;
-
-  @override
-  State<_PulsingDot> createState() => _PulsingDotState();
-}
-
-class _PulsingDotState extends State<_PulsingDot>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-  late final Animation<double> _animation;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    )..repeat(reverse: true);
-    _animation = Tween<double>(
-      begin: 0.5,
-      end: 1.0,
-    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _animation,
-      builder: (context, child) {
-        return Container(
-          width: widget.size,
-          height: widget.size,
-          decoration: BoxDecoration(
-            color: widget.color.withAlpha((255 * _animation.value).toInt()),
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: widget.color.withAlpha((77 * _animation.value).toInt()),
-                blurRadius: 4 * _animation.value,
-                spreadRadius: 1,
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
 
 // ═══════════════════════════════════════════════════════════
 // Empty State View
