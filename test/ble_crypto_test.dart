@@ -12,40 +12,40 @@ void main() {
     BleCrypto.endSession();
   });
 
-  test('decrypts ESP32 encrypted auth reply hex packet', () async {
+  test('decrypts ESP32 encrypted auth reply raw binary packet', () async {
     await BleCrypto.beginSession();
 
-    final wireBytes = await _firmwareEncryptHex('AUTH_OK', replyCounter: 1);
+    final wireBytes = await _firmwareEncryptRaw('AUTH_OK', replyCounter: 1);
     final plaintext = await BleCrypto.decrypt(wireBytes);
 
     expect(utf8.decode(plaintext), 'AUTH_OK');
   });
 
-  test('encrypts outbound packets as ASCII hex IV cipher tag', () async {
+  test('encrypts outbound packets as raw binary nonce + ciphertext + tag', () async {
     await BleCrypto.beginSession();
 
     final wireBytes = await BleCrypto.encrypt(utf8.encode('HB'));
-    final wireText = utf8.decode(wireBytes);
-    final raw = _hexDecode(wireText);
 
-    expect(RegExp(r'^[0-9A-F]+$').hasMatch(wireText), isTrue);
-    expect(raw.length, 12 + 2 + 16);
-    expect(raw.sublist(0, 6), [0, 0, 0, 0, 0, 1]);
-    expect(raw.sublist(6, 12), [0, 0, 0, 0, 0, 1]);
+    // 'HB' = 2 plaintext bytes → nonce(12) + ciphertext(2) + tag(16) = 30 bytes
+    expect(wireBytes.length, 12 + 2 + 16);
+    // Session counter = 1 (first session after reset)
+    expect(wireBytes.sublist(0, 6), [0, 0, 0, 0, 0, 1]);
+    // Packet counter = 1 (first packet in session)
+    expect(wireBytes.sublist(6, 12), [0, 0, 0, 0, 0, 1]);
   });
 
   test('rejects replayed ESP32 reply counters', () async {
     await BleCrypto.beginSession();
 
-    final first = await _firmwareEncryptHex('AUTH_OK', replyCounter: 1);
-    final replay = await _firmwareEncryptHex('AUTH_OK', replyCounter: 1);
+    final first = await _firmwareEncryptRaw('AUTH_OK', replyCounter: 1);
+    final replay = await _firmwareEncryptRaw('AUTH_OK', replyCounter: 1);
 
     expect(utf8.decode(await BleCrypto.decrypt(first)), 'AUTH_OK');
     expect(() => BleCrypto.decrypt(replay), throwsA(isA<BleCryptoException>()));
   });
 }
 
-Future<List<int>> _firmwareEncryptHex(
+Future<List<int>> _firmwareEncryptRaw(
   String plaintext, {
   required int replyCounter,
 }) async {
@@ -64,25 +64,7 @@ Future<List<int>> _firmwareEncryptHex(
     nonce: nonce,
   );
 
-  final raw = <int>[...nonce, ...secretBox.cipherText, ...secretBox.mac.bytes];
-
-  return utf8.encode(_hexEncode(raw));
-}
-
-Uint8List _hexDecode(String hex) {
-  final result = Uint8List(hex.length ~/ 2);
-  for (var i = 0; i < result.length; i++) {
-    result[i] = int.parse(hex.substring(i * 2, i * 2 + 2), radix: 16);
-  }
-  return result;
-}
-
-String _hexEncode(List<int> bytes) {
-  final buffer = StringBuffer();
-  for (final byte in bytes) {
-    buffer.write(byte.toRadixString(16).padLeft(2, '0').toUpperCase());
-  }
-  return buffer.toString();
+  return [...nonce, ...secretBox.cipherText, ...secretBox.mac.bytes];
 }
 
 const _aesKey = <int>[
