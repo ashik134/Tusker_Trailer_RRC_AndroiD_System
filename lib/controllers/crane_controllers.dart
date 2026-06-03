@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:tusker_trailer_rrc/models/app_enums.dart';
+import 'package:tusker_trailer_rrc/models/ble_connection_state.dart';
 import 'package:tusker_trailer_rrc/models/ble_scan_device.dart';
 import 'package:tusker_trailer_rrc/models/plc_output_command.dart';
 import 'package:tusker_trailer_rrc/services/ble_service.dart';
@@ -9,14 +11,7 @@ import 'package:tusker_trailer_rrc/services/biometric_service.dart';
 import 'package:tusker_trailer_rrc/services/secure_credential_store.dart';
 import 'package:tusker_trailer_rrc/services/permission_service.dart';
 import 'package:tusker_trailer_rrc/services/device_identity_service.dart';
-import 'package:tusker_trailer_rrc/utils/constants.dart';
 import 'package:tusker_trailer_rrc/utils/preferences.dart';
-
-enum AppScreen { connection, authentication, control }
-
-enum HoistState { idle, upSlow, upFast, downSlow, downFast }
-
-enum MotionAxis { vertical, horizontal }
 
 class CraneController extends ChangeNotifier {
   final BleService _bleService = BleService();
@@ -25,7 +20,6 @@ class CraneController extends ChangeNotifier {
 
   StreamSubscription<BleConnectionState>? _connStateSubscription;
   StreamSubscription<List<BleScanDevice>>? _scanSubscription;
-  StreamSubscription<Map<String, int>>? _analogSubscription;
   StreamSubscription<PlcOutputCommand>? _statusSubscription;
   StreamSubscription<BluetoothAdapterState>? _adapterSubscription;
 
@@ -68,10 +62,7 @@ class CraneController extends ChangeNotifier {
   HoistDirection? _verticalDirectionLock;
   HoistDirection? _horizontalDirectionLock;
   bool _deadmanHeld = false;
-  // bool _conflictActive = false;
-  // bool _upActive = false;
-  // bool _downActive = false;
-  // bool _fastActive = false;
+
 
   bool get isInitializing => _initializing;
   bool get bluetoothReady => _bluetoothReady;
@@ -83,10 +74,6 @@ class CraneController extends ChangeNotifier {
     _permissionBannerDismissed = true;
     notifyListeners();
   }
-  //  bool get conflictActive => _conflictActive;
-  //  bool get upActive => _upActive;
-  // bool get downActive => _downActive;
-  // bool get fastActive => _fastActive;
 
   bool get rememberCredentials => _rememberCredentials;
   bool get isBiometricAvailable => _biometricAvailable;
@@ -181,20 +168,6 @@ class CraneController extends ChangeNotifier {
       _ => HoistState.idle,
     };
   }
-
-  //  ControlState get upStage {
-  //   if (_estopLatched || _conflictActive || !_upActive) {
-  //     return ControlState.idle;
-  //   }
-  //   return _fastActive ? ControlState.fast : ControlState.slow;
-  // }
-
-  //  ControlState get downStage {
-  //   if (_estopLatched || _conflictActive || !_downActive) {
-  //     return ControlState.idle;
-  //   }
-  //   return _fastActive ? ControlState.fast : ControlState.slow;
-  // }
 
   String get statusLabel => _activeCommand.statusLabel;
 
@@ -296,56 +269,6 @@ class CraneController extends ChangeNotifier {
     }
   }
 
-  // Future<void> sendCommand({
-  //   required bool estop,
-  //   required bool up,
-  //   required bool down,
-  //   required bool fast,
-  //   bool conflict = false,
-  // }) async {
-  //   if (estop) {
-  //     _estopLatched = true;
-  //     _upActive = false;
-  //     _downActive = false;
-  //     _fastActive = false;
-  //     _conflictActive = false;
-  //     notifyListeners();
-  //     debugPrint("E-STOP ACTIVATED! Sending E-STOP command to PLC...");
-  //     return;
-  //   }
-
-  //   if (_conflictActive && !conflict) {
-  //     return;
-  //   }
-
-  //   if (conflict || (up && down)) {
-  //     _conflictActive = true;
-  //     _upActive = false;
-  //     _downActive = false;
-  //     _fastActive = false;
-  //     notifyListeners();
-  //     debugPrint("CONFLICT DETECTED! Sending conflict state to PLC...");
-  //     return;
-  //   }
-  //   _estopLatched= false;
-  //   _conflictActive = false;
-  //   _upActive = up;
-  //   _downActive = down;
-  //   _fastActive = fast && (_upActive || _downActive);
-  //   notifyListeners();
-  // }
-  //  void clearConflict() {
-  //   _conflictActive = false;
-  //   _upActive = false;
-  //   _downActive = false;
-  //   _fastActive = false;
-  //   notifyListeners();
-  // }
-
-  bool verifyLocalPassword(String password) {
-    return password == 'Admin123';
-  }
-
   // Initialization and Cleanup //////////////////////////////////////////////////////////////////////////////
   Future<void> initialize() {
     if (_initializeFuture != null) {
@@ -429,16 +352,9 @@ class CraneController extends ChangeNotifier {
       notifyListeners();
     });
 
-    // _analogSubscription = _bleService.analogStream.listen((values) {
-    //   _analogValues = values;
-    //   notifyListeners();
-    // });
-
     _statusSubscription = _bleService.statusStream.listen((command) {
       _activeCommand = command;
-      if (command.estop) {
-        _estopLatched = true;
-      }
+      if (command.estop) _estopLatched = true;
       notifyListeners();
     });
 
@@ -970,7 +886,6 @@ class CraneController extends ChangeNotifier {
   void dispose() {
     _connStateSubscription?.cancel();
     _scanSubscription?.cancel();
-    _analogSubscription?.cancel();
     _statusSubscription?.cancel();
     _adapterSubscription?.cancel();
     _bleService.dispose();

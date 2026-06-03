@@ -42,7 +42,9 @@ class BleCrypto {
 
   static final _secretKey = SecretKey(_keyBytes);
 
-  // ── Session state ──
+  // --------------------------------------------------------------------------
+  // Session State
+  // --------------------------------------------------------------------------
 
   static Uint8List? _sessionId;
 
@@ -54,7 +56,9 @@ class BleCrypto {
 
   static bool get sessionActive => _sessionId != null;
 
-  // ── Session lifecycle ────────────────────────────────────────────────────
+  // ==========================================================================
+  // Session Lifecycle
+  // ==========================================================================
 
   static Future<void> beginSession() async {
     _packetCounter = 0;
@@ -67,7 +71,6 @@ class BleCrypto {
     final next = stored + 1;
 
     await prefs.setInt(_kSessionCounter, next);
-
     _sessionId = _encodeUint48(next);
   }
 
@@ -78,7 +81,9 @@ class BleCrypto {
     _plcSessionId = null;
   }
 
-  // ── Encryption ──
+  // ==========================================================================
+  // Encryption
+  // ==========================================================================
 
   static Future<List<int>> encrypt(List<int> plaintext) async {
     final nonce = _buildNonce();
@@ -108,17 +113,10 @@ class BleCrypto {
 
   // ── Decryption ──
 
-  /// Bytes  0..5   →  PLC nonce prefix  (big-endian 48-bit, PLC-defined)
-  /// Bytes  6..11  →  Packet counter    (big-endian 48-bit)
+  /// Bytes  0..5   →  PLC nonce prefix
+  /// Bytes  6..11  →  Packet counter
   /// Bytes 12..N-17 → Ciphertext
-  /// Bytes N-16..N  → GCM Auth Tag     (16 bytes)
-
-  /// ## Validation chain (all must pass)
-  /// 1. Minimum length ≥ 28 bytes (12-byte nonce + 16-byte tag).
-  /// 2. Nonce prefix (bytes 0–5) matches [_plcSessionId] if already bound,
-  ///    otherwise binds to it on the first inbound packet.
-  /// 3. Packet counter strictly exceeds [_inboundCounter] (replay protection).
-  /// 4. AES-GCM authentication tag verifies (tamper / corruption detection).
+  /// Bytes N-16..N  → GCM Auth Tag
 
   static Future<List<int>> decrypt(List<int> wireBytes) async {
     final session = _sessionId;

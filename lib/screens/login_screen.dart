@@ -6,7 +6,7 @@ import 'package:provider/provider.dart';
 
 import 'package:tusker_trailer_rrc/utils/constants.dart';
 import 'package:tusker_trailer_rrc/screens/settings_screen.dart';
-import 'package:tusker_trailer_rrc/services/ble_service.dart';
+import 'package:tusker_trailer_rrc/models/ble_connection_state.dart';
 import 'package:tusker_trailer_rrc/services/biometric_service.dart';
 import 'package:tusker_trailer_rrc/controllers/crane_controllers.dart';
 
