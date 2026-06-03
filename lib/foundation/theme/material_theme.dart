@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:tusker_trailer_rrc/utils/foundation/theme/app_colors.dart';
+import 'package:tusker_trailer_rrc/foundation/theme/app_colors.dart';
 
 class AppTheme {
   AppTheme._();

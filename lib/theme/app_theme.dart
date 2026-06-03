@@ -1,4 +1,4 @@
-// Re-export from organised core location.
-// All existing imports of 'package:tusker_trailer_rrc/theme/app_theme.dart'
-// will continue to resolve without change.
-export 'package:tusker_trailer_rrc/utils/foundation/theme/app_theme.dart';
+// This file serves as a barrel file for the app theme
+// allowing other parts of the app to import the theme from a single location.
+
+export 'package:tusker_trailer_rrc/foundation/theme/material_theme.dart';
