@@ -129,7 +129,15 @@ class BleCrypto {
       );
     }
 
-    final raw = Uint8List.fromList(wireBytes);
+    // Auto-detect hex-encoded packets (current PLC firmware sends replies as
+    // uppercase hex ASCII strings). Raw binary packets pass through unchanged.
+    // This bridge remains until PLC firmware is updated to send raw binary.
+    final Uint8List raw;
+    if (_looksLikeHex(wireBytes)) {
+      raw = _hexDecode(wireBytes);
+    } else {
+      raw = Uint8List.fromList(wireBytes);
+    }
 
     // 1. Length check: 12-byte nonce + ≥0-byte ciphertext + 16-byte tag.
     if (raw.length < 28) {
@@ -224,6 +232,29 @@ class BleCrypto {
     nonce[11] = counter & 0xFF;
 
     return nonce;
+  }
+
+  /// Returns true when [bytes] is a valid even-length sequence of ASCII hex
+  /// characters (0-9, A-F, a-f).  Used to detect PLC replies encoded as hex
+  /// strings rather than raw binary.
+  static bool _looksLikeHex(List<int> bytes) {
+    if (bytes.isEmpty || bytes.length.isOdd) return false;
+    return bytes.every(
+      (b) =>
+          (b >= 0x30 && b <= 0x39) || // 0-9
+          (b >= 0x41 && b <= 0x46) || // A-F
+          (b >= 0x61 && b <= 0x66), // a-f
+    );
+  }
+
+  /// Decodes an ASCII hex byte sequence into raw binary.
+  static Uint8List _hexDecode(List<int> hexBytes) {
+    final text = String.fromCharCodes(hexBytes);
+    final result = Uint8List(text.length ~/ 2);
+    for (var i = 0; i < result.length; i++) {
+      result[i] = int.parse(text.substring(i * 2, i * 2 + 2), radix: 16);
+    }
+    return result;
   }
 
   static int _decodeUint48(Uint8List bytes, int offset) {
