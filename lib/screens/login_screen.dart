@@ -1,3 +1,5 @@
+// ignore_for_file: unused_local_variable
+
 import 'package:flutter/material.dart';
 
 import 'package:provider/provider.dart';
@@ -1109,6 +1111,7 @@ class _BeaconPulse extends StatelessWidget {
   }
 }
 
+// ignore: unused_element
 class _ContextInfoPill extends StatelessWidget {
   const _ContextInfoPill({
     required this.icon,

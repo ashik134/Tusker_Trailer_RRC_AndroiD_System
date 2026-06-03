@@ -59,7 +59,7 @@ class BleService {
 
   BleConnectionState _snapshot = BleConnectionState.initial();
   BluetoothDevice? _device;
-  BleScanDevice? _connectedDevice; 
+  BleScanDevice? _connectedDevice;
 
   BluetoothCharacteristic? _digitalChar;
   BluetoothCharacteristic? _authChar;
@@ -90,6 +90,12 @@ class BleService {
   // ── Heartbeat loop ──────────────────────────────────────────────────────────
   bool _heartbeatActive = false;
   Timer? _heartbeatTimer;
+  bool _heartbeatWritePending = false;
+
+  // All AES-GCM encrypted app→PLC writes share one monotonic nonce counter in
+  // the firmware, so they must be encrypted and written in call order.
+  Future<void> _encryptedWriteLane = Future<void>.value();
+  int _cryptoSessionGeneration = 0;
 
   // ── Continuous scan control ─────────────────────────────────────────────────
   bool _scanShouldContinue = false;
@@ -148,8 +154,9 @@ class BleService {
         for (final result in results) {
           final advertisedName = result.advertisementData.advName.trim();
           final platformName = result.device.platformName.trim();
-          final resolvedName =
-              advertisedName.isNotEmpty ? advertisedName : platformName;
+          final resolvedName = advertisedName.isNotEmpty
+              ? advertisedName
+              : platformName;
 
           if (resolvedName.isEmpty ||
               !resolvedName.startsWith(BLEConstants.scanNamePrefix)) {
@@ -439,7 +446,11 @@ class BleService {
         _logger.w('Safe-state cleanup write failed during disconnect.');
       }
     }
+    _cryptoSessionGeneration++;
     _sessionAuthenticated = false; // clear before tearing down characteristics
+    _heartbeatWritePending = false;
+    _encryptedWriteLane = Future<void>.value();
+    BleCrypto.endSession();
 
     await _authSubscription?.cancel();
     await _statusSubscription?.cancel();
@@ -473,7 +484,10 @@ class BleService {
     }
     _stopRssiPolling();
     _stopHeartbeat();
+    _cryptoSessionGeneration++;
     _sessionAuthenticated = false;
+    _heartbeatWritePending = false;
+    _encryptedWriteLane = Future<void>.value();
     BleCrypto.endSession(); // clear in-memory IV state; persisted counter stays as watermark
     _device = null;
     _connectedDevice = null;
@@ -509,8 +523,6 @@ class BleService {
     _statusController.add(command);
   }
 
-
-
   Future<void> _sendSafeStatePreAuthBestEffort() async {
     if (_digitalChar == null) {
       return;
@@ -528,48 +540,89 @@ class BleService {
       throw StateError('Digital characteristic is not ready.');
     }
     final plainBytes = PlcOutputCommand.emergencyStop().wireBytes.toList();
-    final wireBytes = _sessionAuthenticated
-        ? await BleCrypto.encrypt(plainBytes)
-        : plainBytes;
-    await _digitalChar!.write(wireBytes, withoutResponse: false);
-  }
-
-  void _handleAuthNotification(List<int> bytes) {
-    // ALL auth-characteristic notifications from the ESP32 firmware are
-    // plain-text UTF-8 strings — no AES-GCM encryption on this channel.
-    //
-    //   PLC → app:  "AUTH_REQ:email|password|device_id" (on connect)
-    //               "AUTH_OK"      (credentials + device ID accepted)
-    //               "AUTH_FAIL"    (credentials or device ID rejected)
-    //               "AUTH_TIMEOUT" (30-second inactivity window expired)
-    //               "AUTH_UNTRUSTED" (future: device not in trusted list)
-    //
-    // The AES-128-GCM session for digital-characteristic writes is started
-    // inside _finalizeAuthenticatedSession() after AUTH_OK is confirmed.
-    final payload = _tryDecodeUtf8(bytes)?.trim();
-    if (payload == null) {
-      _logger.w(
-        'Auth notification: non-UTF8 data (${bytes.length} bytes) ignored.',
+    if (_sessionAuthenticated) {
+      await _writeEncryptedCharacteristic(
+        characteristic: _digitalChar!,
+        plaintext: plainBytes,
+        withoutResponse: false,
+        label: 'safe-state',
       );
       return;
     }
+    await _digitalChar!.write(plainBytes, withoutResponse: false);
+  }
 
-    _logger.i('Auth notification: $payload');
+  void _handleAuthNotification(List<int> bytes) {
+    unawaited(_handleAuthNotificationAsync(bytes));
+  }
 
-    if (payload == BLEConstants.authRequest) {
-      if (_snapshot.status != BleConnectionStatus.authenticated) {
-        _emit(BleConnectionStatus.awaitingAuthentication);
+  Future<void> _handleAuthNotificationAsync(List<int> bytes) async {
+    final plainPayload = _tryDecodeUtf8(bytes)?.trim();
+    if (await _handleAuthPayload(plainPayload, source: 'plain')) {
+      return;
+    }
+
+    if (_pendingAuthCompleter == null || !BleCrypto.sessionActive) {
+      if (plainPayload == null) {
+        _logger.w(
+          'Auth notification: non-UTF8 data (${bytes.length} bytes) ignored.',
+        );
+      } else {
+        _logger.w('Unknown auth notification payload: "$plainPayload"');
       }
       return;
     }
 
+    try {
+      final decrypted = await BleCrypto.decrypt(bytes);
+      final encryptedPayload = _tryDecodeUtf8(decrypted)?.trim();
+      if (await _handleAuthPayload(encryptedPayload, source: 'encrypted')) {
+        return;
+      }
+      _logger.w(
+        'Unknown encrypted auth notification payload: "$encryptedPayload"',
+      );
+    } on BleCryptoException catch (e) {
+      _logger.e('Encrypted auth notification rejected: $e');
+      await _enterCryptoSafeState('Auth response decrypt failed: $e');
+    } on StateError catch (e) {
+      _logger.e('Encrypted auth notification session error: $e');
+      await _enterCryptoSafeState('Auth response session error: $e');
+    } catch (e) {
+      _logger.e('Encrypted auth notification error: $e');
+      await _enterCryptoSafeState('Auth response error: $e');
+    }
+  }
+
+  Future<bool> _handleAuthPayload(
+    String? payload, {
+    required String source,
+  }) async {
+    if (payload == null || payload.isEmpty) {
+      return false;
+    }
+
+    if (payload.startsWith('AUTH_REQ:')) {
+      _logger.i('Auth notification ($source): AUTH_REQ');
+      if (_snapshot.status != BleConnectionStatus.authenticated) {
+        _emit(BleConnectionStatus.awaitingAuthentication);
+      }
+      return true;
+    }
+
     if (payload == BLEConstants.authSuccess) {
-      // Fire-and-forget: starts AES-GCM session then emits authenticated state.
-      _finalizeAuthenticatedSession();
-      return;
+      _logger.i('Auth notification ($source): $payload');
+      await _finalizeAuthenticatedSession();
+      return true;
     }
 
     if (payload == BLEConstants.authUntrusted) {
+      _logger.w('Auth notification ($source): $payload');
+      _cryptoSessionGeneration++;
+      _sessionAuthenticated = false;
+      _heartbeatWritePending = false;
+      _encryptedWriteLane = Future<void>.value();
+      BleCrypto.endSession();
       _pendingAuthCompleter?.complete(BleAuthOutcome.untrusted);
       _pendingAuthCompleter = null;
       _emit(BleConnectionStatus.error, message: payload);
@@ -577,11 +630,17 @@ class BleService {
       // session immediately so the BLE link does not remain open and occupy
       // the PLC's single-operator slot, blocking legitimate reconnection.
       unawaited(disconnect(emitState: false));
-      return;
+      return true;
     }
 
     if (payload == BLEConstants.authFailed ||
         payload == BLEConstants.authTimeout) {
+      _logger.w('Auth notification ($source): $payload');
+      _cryptoSessionGeneration++;
+      _sessionAuthenticated = false;
+      _heartbeatWritePending = false;
+      _encryptedWriteLane = Future<void>.value();
+      BleCrypto.endSession();
       _pendingAuthCompleter?.complete(
         payload == BLEConstants.authTimeout
             ? BleAuthOutcome.timedOut
@@ -589,10 +648,10 @@ class BleService {
       );
       _pendingAuthCompleter = null;
       _emit(BleConnectionStatus.error, message: payload);
-      return;
+      return true;
     }
 
-    _logger.w('Unknown auth notification payload: "$payload"');
+    return false;
   }
 
   /// Attempts to decode [bytes] as UTF-8.  Returns [null] on failure rather
@@ -628,7 +687,10 @@ class BleService {
     _stopHeartbeat();
 
     // 2. Clear the authenticated session — no further encrypted writes allowed.
+    _cryptoSessionGeneration++;
     _sessionAuthenticated = false;
+    _heartbeatWritePending = false;
+    _encryptedWriteLane = Future<void>.value();
     BleCrypto.endSession();
 
     // 3. Fail any pending authentication future.
@@ -700,6 +762,10 @@ class BleService {
     //   Auth char    → AES-128-GCM encrypted (Flutter → PLC)
     //   Digital char → AES-128-GCM encrypted (Flutter → PLC)
     //   Heartbeat    → AES-128-GCM encrypted (Flutter → PLC)
+    _cryptoSessionGeneration++;
+    _sessionAuthenticated = false;
+    _heartbeatWritePending = false;
+    _encryptedWriteLane = Future<void>.value();
     BleCrypto.endSession(); // Clear any stale state from a previous attempt.
     await BleCrypto.beginSession();
 
@@ -762,12 +828,20 @@ class BleService {
   // Dart event-loop latency visible as sluggish control response.
   void _sendHeartbeatTick(bool useWithoutResponse) {
     if (!_heartbeatActive || _isDisposing) return;
+    if (_heartbeatWritePending) return;
     final char = _heartbeatChar;
     if (char == null) return;
+    _heartbeatWritePending = true;
     // AES-128-GCM encrypted heartbeat — fire-and-forget.
-    _encryptAndSendHeartbeat(char, useWithoutResponse).catchError((Object e) {
-      _logger.w('Heartbeat write failed: $e');
-    });
+    unawaited(
+      _encryptAndSendHeartbeat(char, useWithoutResponse)
+          .catchError((Object e) {
+            _logger.w('Heartbeat write failed: $e');
+          })
+          .whenComplete(() {
+            _heartbeatWritePending = false;
+          }),
+    );
   }
 
   /// Encrypts the heartbeat payload with AES-128-GCM and writes it to [char].
@@ -783,15 +857,17 @@ class BleService {
     bool useWithoutResponse,
   ) async {
     if (!_heartbeatActive || _isDisposing) return;
-    final wireBytes = await BleCrypto.encrypt(
-      utf8.encode(BLEConstants.heartbeatPayload),
+    await _writeEncryptedCharacteristic(
+      characteristic: char,
+      plaintext: utf8.encode(BLEConstants.heartbeatPayload),
+      withoutResponse: useWithoutResponse,
+      label: 'heartbeat',
     );
-    if (!_heartbeatActive || _isDisposing) return;
-    await char.write(wireBytes, withoutResponse: useWithoutResponse);
   }
 
   void _stopHeartbeat() {
     _heartbeatActive = false;
+    _heartbeatWritePending = false;
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
   }
@@ -833,25 +909,70 @@ class BleService {
 
   // ── Write helpers ──────────────────────────────────────────────────────────
 
+  Future<void> _writeEncryptedCharacteristic({
+    required BluetoothCharacteristic characteristic,
+    required List<int> plaintext,
+    required bool withoutResponse,
+    required String label,
+  }) {
+    final generation = _cryptoSessionGeneration;
+    final writeFuture = _encryptedWriteLane.then((_) async {
+      if (_isDisposing ||
+          !_sessionAuthenticated ||
+          generation != _cryptoSessionGeneration ||
+          _device?.isConnected != true) {
+        return;
+      }
+
+      final wireBytes = await BleCrypto.encrypt(plaintext);
+
+      if (_isDisposing ||
+          !_sessionAuthenticated ||
+          generation != _cryptoSessionGeneration ||
+          _device?.isConnected != true) {
+        return;
+      }
+
+      await characteristic.write(wireBytes, withoutResponse: withoutResponse);
+    });
+
+    _encryptedWriteLane = writeFuture.then<void>(
+      (_) {},
+      onError: (Object error, StackTrace stackTrace) {
+        _logger.w('Encrypted BLE write lane recovered after $label: $error');
+      },
+    );
+
+    return writeFuture;
+  }
+
   Future<void> writeDigital(List<int> bytes) async {
     if (_digitalChar == null) return;
-    final List<int> wireBytes;
     if (_sessionAuthenticated) {
       try {
-        wireBytes = await BleCrypto.encrypt(bytes);
+        await _writeEncryptedCharacteristic(
+          characteristic: _digitalChar!,
+          plaintext: bytes,
+          withoutResponse: _digitalCharWriteNoResponse,
+          label: 'digital',
+        );
+        return;
       } on BleCryptoException catch (e) {
         _logger.e('Encryption failure on digital write: $e');
-        unawaited(_enterCryptoSafeState('BleCryptoException during encrypt: $e'));
+        unawaited(
+          _enterCryptoSafeState('BleCryptoException during encrypt: $e'),
+        );
         return;
       } on StateError catch (e) {
         _logger.e('Crypto session state error on digital write: $e');
         unawaited(_enterCryptoSafeState('StateError during encrypt: $e'));
         return;
       }
-    } else {
-      wireBytes = bytes;
     }
-    await _digitalChar!.write(wireBytes, withoutResponse: _digitalCharWriteNoResponse);
+    await _digitalChar!.write(
+      bytes,
+      withoutResponse: _digitalCharWriteNoResponse,
+    );
   }
 
   Future<void> writeAuth(List<int> bytes) async {
