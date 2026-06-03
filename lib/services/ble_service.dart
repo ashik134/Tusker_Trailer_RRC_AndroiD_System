@@ -10,37 +10,9 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:tusker_trailer_rrc/utils/constants.dart';
 
 import 'package:tusker_trailer_rrc/models/ble_scan_device.dart';
+import 'package:tusker_trailer_rrc/models/ble_connection_state.dart';
 import 'package:tusker_trailer_rrc/models/plc_output_command.dart';
 import 'package:tusker_trailer_rrc/services/ble_crypto.dart';
-
-enum BleConnectionStatus {
-  disconnected,
-  scanning,
-  connecting,
-  connected,
-  awaitingAuthentication,
-  authenticating,
-  authenticated,
-  error,
-}
-
-enum BleAuthOutcome { success, failed, timedOut, untrusted }
-
-class BleConnectionState {
-  const BleConnectionState({
-    required this.status,
-    this.message,
-    this.connectedDevice,
-  });
-
-  final BleConnectionStatus status;
-  final String? message;
-  final BleScanDevice? connectedDevice;
-
-  factory BleConnectionState.initial() {
-    return const BleConnectionState(status: BleConnectionStatus.disconnected);
-  }
-}
 
 class BleService {
   final Logger _logger = Logger(printer: SimplePrinter(colors: true));

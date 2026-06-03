@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import 'package:tusker_trailer_rrc/services/ble_crypto.dart';
 
 void main() {
@@ -12,8 +13,7 @@ void main() {
     BleCrypto.endSession();
   });
 
-  // Current PLC firmware sends encrypted notifications as uppercase hex ASCII
-  // strings.  decrypt() auto-detects this format and decodes before decrypting.
+  // decrypting PLC replies
   test('decrypts PLC hex-encoded encrypted auth reply', () async {
     await BleCrypto.beginSession();
 
@@ -34,18 +34,22 @@ void main() {
     expect(utf8.decode(plaintext), 'AUTH_OK');
   });
 
-  test('encrypts outbound packets as raw binary nonce + ciphertext + tag', () async {
-    await BleCrypto.beginSession();
+  // encrypting outbound packets
+  test(
+    'encrypts outbound packets as raw binary nonce + ciphertext + tag',
+    () async {
+      await BleCrypto.beginSession();
 
-    final wireBytes = await BleCrypto.encrypt(utf8.encode('HB'));
+      final wireBytes = await BleCrypto.encrypt(utf8.encode('HB')); 
 
-    // 'HB' = 2 plaintext bytes → nonce(12) + ciphertext(2) + tag(16) = 30 bytes
-    expect(wireBytes.length, 12 + 2 + 16);
-    // Session counter = 1 (first session after reset)
-    expect(wireBytes.sublist(0, 6), [0, 0, 0, 0, 0, 1]);
-    // Packet counter = 1 (first packet in session)
-    expect(wireBytes.sublist(6, 12), [0, 0, 0, 0, 0, 1]);
-  });
+      // 'HB' = 2 plaintext bytes → nonce(12) + ciphertext(2) + tag(16) = 30 bytes
+      expect(wireBytes.length, 12 + 2 + 16);
+      // Session counter = 1 (first session after reset)
+      expect(wireBytes.sublist(0, 6), [0, 0, 0, 0, 0, 1]);
+      // Packet counter = 1 (first packet in session)
+      expect(wireBytes.sublist(6, 12), [0, 0, 0, 0, 0, 1]);
+    },
+  );
 
   test('rejects replayed ESP32 reply counters', () async {
     await BleCrypto.beginSession();
