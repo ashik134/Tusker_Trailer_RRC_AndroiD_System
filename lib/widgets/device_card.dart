@@ -1,7 +1,10 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
-import 'package:tusker_trailer_rrc/models/ble_scan_device.dart';
 import 'package:tusker_trailer_rrc/utils/constants.dart';
+import 'package:tusker_trailer_rrc/models/ble_scan_device.dart';
+import 'package:tusker_trailer_rrc/widgets/circular_progress_indicator.dart';
 
 class AvailableDeviceCard extends StatelessWidget {
   const AvailableDeviceCard({
@@ -236,12 +239,27 @@ class ConnectedDeviceCard extends StatelessWidget {
               ),
               // Status / Connecting indicator
               if (isConnecting)
-                const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2.5,
-                    color: ConnectionColors.scanning,
+                SizedBox(
+                  width: 30,
+                  height: 30,
+                  child: CustomCircularStepProgressIndicator(
+                    totalSteps: 20,
+                    currentStep: 12,
+                    stepSize: 20,
+                    selectedColor: Colors.red,
+                    unselectedColor: const Color.fromARGB(255, 71, 100, 188),
+                    padding: math.pi / 80,
+                    width: 30,
+                    height: 30,
+                    startingAngle: -math.pi * 2 / 3,
+                    arcSize: math.pi * 2 / 3 * 2,
+                    gradientColor: const LinearGradient(
+                      colors: [
+                        Color.fromARGB(255, 54, 184, 244),
+                        Color.fromARGB(255, 111, 152, 224),
+                      ],
+                    ),
+                    isAnimating: isConnecting,
                   ),
                 ),
             ],
