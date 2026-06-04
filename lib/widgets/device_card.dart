@@ -161,12 +161,10 @@ class ConnectedDeviceCard extends StatelessWidget {
   const ConnectedDeviceCard({
     super.key,
     required this.device,
-    required this.isConnecting,
     required this.onDisconnect,
   });
 
   final BleScanDevice device;
-  final bool isConnecting;
   final VoidCallback onDisconnect;
 
   @override
@@ -237,66 +235,64 @@ class ConnectedDeviceCard extends StatelessWidget {
                   ],
                 ),
               ),
+
               // Status / Connecting indicator
-              if (isConnecting)
-                SizedBox(
+              const SizedBox(
+                width: 30,
+                height: 30,
+                child: CustomCircularStepProgressIndicator(
+                  totalSteps: 20,
+                  currentStep: 12,
+                  stepSize: 20,
+                  selectedColor: Colors.red,
+                  unselectedColor: Color.fromARGB(255, 71, 100, 188),
+                  padding: math.pi / 80,
                   width: 30,
                   height: 30,
-                  child: CustomCircularStepProgressIndicator(
-                    totalSteps: 20,
-                    currentStep: 12,
-                    stepSize: 20,
-                    selectedColor: Colors.red,
-                    unselectedColor: const Color.fromARGB(255, 71, 100, 188),
-                    padding: math.pi / 80,
-                    width: 30,
-                    height: 30,
-                    startingAngle: -math.pi * 2 / 3,
-                    arcSize: math.pi * 2 / 3 * 2,
-                    gradientColor: const LinearGradient(
-                      colors: [
-                        Color.fromARGB(255, 54, 184, 244),
-                        Color.fromARGB(255, 111, 152, 224),
-                      ],
-                    ),
-                    isAnimating: isConnecting,
+                  startingAngle: -math.pi * 2 / 3,
+                  arcSize: math.pi * 2 / 3 * 2,
+                  gradientColor: LinearGradient(
+                    colors: [
+                      Color.fromARGB(255, 54, 184, 244),
+                      Color.fromARGB(255, 111, 152, 224),
+                    ],
                   ),
+                  isAnimating: true,
                 ),
+              ),
             ],
           ),
 
-          if (isConnecting) ...[
-            const SizedBox(height: 14),
+          const SizedBox(height: 4),
 
-            // ── RSSI Bar
-            _RSSIBar(rssi: device.rssi),
+          // ── RSSI Bar
+          _RSSIBar(rssi: device.rssi),
 
-            const SizedBox(height: 14),
+          const SizedBox(height: 4),
 
-            // ── Disconnect Button
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: onDisconnect,
-                icon: const Icon(Icons.bluetooth_disabled_rounded, size: 16),
-                label: const Text('DISCONNECT'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: ConnectionColors.error,
-                  side: BorderSide(color: ConnectionColors.error.withAlpha(80)),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  textStyle: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.8,
-                  ),
-                  backgroundColor: ConnectionColors.error.withAlpha(10),
+          // ── Disconnect Button
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: onDisconnect,
+              icon: const Icon(Icons.bluetooth_disabled_rounded, size: 16),
+              label: const Text('DISCONNECT'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: ConnectionColors.error,
+                side: BorderSide(color: ConnectionColors.error.withAlpha(80)),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
                 ),
+                textStyle: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.8,
+                ),
+                backgroundColor: ConnectionColors.error.withAlpha(10),
               ),
             ),
-          ],
+          ),
         ],
       ),
     );

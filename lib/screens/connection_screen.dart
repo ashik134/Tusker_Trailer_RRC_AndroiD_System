@@ -887,7 +887,6 @@ class _DevicesPanelState extends State<_DevicesPanel>
             return ConnectedDeviceCard(
               key: ValueKey(targetDevice.id),
               device: targetDevice,
-              isConnecting: c.isConnectionActive,
               onDisconnect: c.disconnect,
             );
           }

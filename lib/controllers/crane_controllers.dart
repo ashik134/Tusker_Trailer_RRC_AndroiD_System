@@ -118,11 +118,13 @@ class CraneController extends ChangeNotifier {
       _transportConnState.status == BleConnectionStatus.awaitingAuthentication;
 
   /// True during any connection phase before navigation completes:
-  /// transport connecting, awaiting authentication, or mid-authentication.
+  /// transport connecting, transport connected (handshake pending),
+  /// awaiting authentication, or mid-authentication.
   /// Use this — not [isConnecting] — to gate UI and scan updates so the
   /// device list and card never revert to idle state during the handshake.
   bool get isConnectionActive =>
       _transportConnState.status == BleConnectionStatus.connecting ||
+      _transportConnState.status == BleConnectionStatus.connected ||
       _transportConnState.status == BleConnectionStatus.awaitingAuthentication ||
       _transportConnState.status == BleConnectionStatus.authenticating;
 
@@ -176,6 +178,9 @@ class CraneController extends ChangeNotifier {
     // authentication screen so the dialog never bleeds into ControlScreen.
     BleConnectionStatus.authenticated =>
       _pendingEnrollmentOffer ? AppScreen.authentication : AppScreen.control,
+    // Transport connected: immediately hand off to auth screen so the user
+    // never sees the connection screen flicker back to idle before navigation.
+    BleConnectionStatus.connected ||
     BleConnectionStatus.awaitingAuthentication ||
     BleConnectionStatus.authenticating => AppScreen.authentication,
     BleConnectionStatus.error
