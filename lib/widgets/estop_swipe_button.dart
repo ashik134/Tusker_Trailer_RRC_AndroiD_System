@@ -129,7 +129,6 @@ class _EStopSwipeButtonState extends State<EStopSwipeButton>
         final progress = _displayProgress;
 
         return GestureDetector(
-          // Only horizontal drag triggers the swipe
           onHorizontalDragStart: _onDragStart,
           onHorizontalDragUpdate: _onDragUpdate,
           onHorizontalDragEnd: _onDragEnd,

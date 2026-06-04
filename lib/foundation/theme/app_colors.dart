@@ -78,7 +78,7 @@ class ConnectionColors {
 
   // Semantic: connected
   static const Color connected = Color(0xFF0D8A4A);
-  static const Color connectedBg = Color(0xFFEAF9F1);
+  static const Color connectedBg = Color.fromARGB(255, 234, 249, 249);
   static const Color connectedBorder = Color(0xFFA3DFC0);
 
   // Semantic: scanning / connecting

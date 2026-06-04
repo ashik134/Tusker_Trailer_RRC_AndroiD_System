@@ -2,10 +2,9 @@ import 'package:flutter/material.dart';
 
 import 'package:provider/provider.dart';
 
-import 'package:tusker_trailer_rrc/models/app_enums.dart';
 import 'package:tusker_trailer_rrc/utils/constants.dart';
-
 import 'package:tusker_trailer_rrc/theme/app_theme.dart';
+import 'package:tusker_trailer_rrc/models/app_enums.dart';
 
 import 'package:tusker_trailer_rrc/screens/login_screen.dart';
 import 'package:tusker_trailer_rrc/screens/splash_screen.dart';

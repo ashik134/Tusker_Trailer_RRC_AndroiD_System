@@ -3,13 +3,13 @@
 import 'package:provider/provider.dart';
 
 import 'package:tusker_trailer_rrc/utils/constants.dart';
-import 'package:tusker_trailer_rrc/models/ble_scan_device.dart';
-
 import 'package:tusker_trailer_rrc/models/ble_connection_state.dart';
+
+import 'package:tusker_trailer_rrc/widgets/device_card.dart';
+import 'package:tusker_trailer_rrc/screens/settings_screen.dart';
+
 import 'package:tusker_trailer_rrc/controllers/crane_controllers.dart';
 
-import 'package:tusker_trailer_rrc/screens/settings_screen.dart';
-import 'package:tusker_trailer_rrc/widgets/device_card.dart';
 
 class ConnectionScreen extends StatefulWidget {
   const ConnectionScreen({super.key});
@@ -926,12 +926,6 @@ class _DevicesPanelState extends State<_DevicesPanel>
     );
   }
 }
-
-
-
-
-
-
 
 // ═══════════════════════════════════════════════════════════
 // Empty State View
