@@ -63,6 +63,12 @@ class CraneController extends ChangeNotifier {
   HoistDirection? _horizontalDirectionLock;
   bool _deadmanHeld = false;
 
+  // Tracks a user-initiated cancellation of an in-progress connect attempt.
+  // Separate from BLE transport state so the UI can show "Cancelling..."
+  // during the async teardown window without flickering back to idle first.
+  bool _cancellingConnection = false;
+  BleScanDevice? _cancellingDevice;
+
 
   bool get isInitializing => _initializing;
   bool get bluetoothReady => _bluetoothReady;
@@ -136,8 +142,17 @@ class CraneController extends ChangeNotifier {
   /// device is not registered in the PLC trusted-device list.
   bool get isDeviceTrustRejected => _deviceTrustRejected;
 
-  
-  
+  /// True while a user-initiated cancellation of a connecting attempt is
+  /// in progress. Guards the UI against flickering back to the idle device
+  /// list before the async BLE teardown completes.
+  bool get isCancellingConnection => _cancellingConnection;
+
+  /// The device that was being connected when the user tapped Cancel.
+  /// Preserved so the ConnectedDeviceCard stays visible and stable during
+  /// the brief async teardown window after [connectionState.connectedDevice]
+  /// is cleared by the BLE service.
+  BleScanDevice? get cancellingDevice => _cancellingDevice;
+
 
   // ── LED indicator states ─────────────────────────────────────────────────
   // Emergency indicator must represent the active lockout condition only.
@@ -462,6 +477,26 @@ class CraneController extends ChangeNotifier {
       _errorMessage = 'Could not connect to ${device.name}: ${e.toString()}';
       notifyListeners();
     }
+  }
+
+  /// Cancels an in-progress connection attempt (connecting state only).
+  /// Does NOT perform the full disconnect teardown — no safe-state write,
+  /// no auth/status subscription cleanup (those do not exist yet during
+  /// the connecting phase). Returns the app cleanly to the idle scan state.
+  ///
+  /// Idempotent — repeated calls while cancellation is in progress are ignored.
+  Future<void> cancelConnecting() async {
+    if (_cancellingConnection) return; // prevent duplicate/rapid-tap calls
+    _errorMessage = null;
+    // Snapshot before the service clears connectedDevice so the UI card
+    // stays stable throughout the async teardown window.
+    _cancellingDevice = _transportConnState.connectedDevice;
+    _cancellingConnection = true;
+    notifyListeners(); // → UI immediately shows "Cancelling..." state
+    await _bleService.cancelConnecting();
+    _cancellingConnection = false;
+    _cancellingDevice = null;
+    notifyListeners(); // → clean state; UI returns to device list
   }
 
   void setRememberCredentials(bool value) {

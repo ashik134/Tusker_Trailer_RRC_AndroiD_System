@@ -274,6 +274,7 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
     final isConnected = controller.isConnected;
     final canScan =
         !controller.isConnectionActive &&
+        !controller.isCancellingConnection &&
         !isConnected &&
         controller.bluetoothReady &&
         controller.permissionsGranted;
@@ -492,6 +493,18 @@ class _StatusBanner extends StatelessWidget {
         color: ConnectionColors.connected,
         bg: ConnectionColors.connectedBg,
         border: ConnectionColors.connectedBorder,
+      );
+    }
+    if (c.isCancellingConnection) {
+      return _BannerData(
+        icon: Icons.close_rounded,
+        title: 'Cancelling Connection',
+        subtitle:
+            'Aborting connection to ${c.cancellingDevice?.name ?? "device"}...',
+        color: ConnectionColors.textSecondary,
+        bg: ConnectionColors.neutralBg,
+        border: ConnectionColors.neutralBorder,
+        loading: true,
       );
     }
     if (c.isConnecting) {
@@ -727,6 +740,7 @@ class _DevicesPanelState extends State<_DevicesPanel>
   Future<void> _onRefresh() async {
     if (widget.controller.isScanning ||
         widget.controller.isConnectionActive ||
+        widget.controller.isCancellingConnection ||
         widget.controller.isConnected) {
       return;
     }
@@ -737,7 +751,7 @@ class _DevicesPanelState extends State<_DevicesPanel>
   @override
   Widget build(BuildContext context) {
     final c = widget.controller;
-    final blocked = c.isScanning || c.isConnectionActive || c.isConnected;
+    final blocked = c.isScanning || c.isConnectionActive || c.isCancellingConnection || c.isConnected;
     final count = c.isConnected ? 1 : c.devices.length;
     return Container(
       decoration: BoxDecoration(
@@ -849,9 +863,13 @@ class _DevicesPanelState extends State<_DevicesPanel>
   Widget _buildBody() {
     final c = widget.controller;
 
-    final targetDevice = c.connectionState.connectedDevice;
+    // During cancellation, connectedDevice is cleared by the service before
+    // emitting disconnected. Fall back to the cached cancellingDevice so the
+    // ConnectedDeviceCard stays stable throughout the async teardown window.
+    final targetDevice =
+        c.connectionState.connectedDevice ?? c.cancellingDevice;
 
-    if (c.isConnected || c.isConnectionActive) {
+    if (c.isConnected || c.isConnectionActive || c.isCancellingConnection) {
       if (targetDevice == null) {
         final sorted = [...c.devices]..sort((a, b) => b.rssi.compareTo(a.rssi));
         if (sorted.isEmpty) {
@@ -887,7 +905,8 @@ class _DevicesPanelState extends State<_DevicesPanel>
             return ConnectedDeviceCard(
               key: ValueKey(targetDevice.id),
               device: targetDevice,
-              onDisconnect: c.disconnect,
+              isCancelling: c.isCancellingConnection,
+              onCancel: c.cancelConnecting,
             );
           }
           final d = others[i - 1];

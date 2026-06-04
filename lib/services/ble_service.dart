@@ -72,6 +72,11 @@ class BleService {
   // ── Continuous scan control ─────────────────────────────────────────────────
   bool _scanShouldContinue = false;
 
+  // Set to true by cancelConnecting() before aborting the in-flight connect()
+  // call. Prevents the connect() catch block from emitting an error state when
+  // the disconnection was intentionally triggered by the user.
+  bool _connectCancelled = false;
+
   // ── Device cache — prevents list flicker between 8-second scan bursts ────────
   final Map<String, BleScanDevice> _deviceCache = {};
   final Map<String, DateTime> _deviceLastSeen = {};
@@ -255,6 +260,9 @@ class BleService {
       );
       await _discoverServices();
     } catch (e) {
+      // If the failure was triggered by cancelConnecting(), let that method
+      // own the state transition — do not emit an error here.
+      if (_connectCancelled) return;
       _connectedDevice = null;
       _emit(
         BleConnectionStatus.error,
@@ -395,6 +403,47 @@ class BleService {
         message: 'Service discovery failed: ${e.toString()}',
       );
     }
+  }
+
+  /// Cancels an in-progress BLE connection attempt (connecting state only).
+  ///
+  /// Unlike [disconnect], this:
+  /// - Does NOT send a safe-state command (device is not yet authenticated).
+  /// - Does NOT go through the full teardown of auth/status subscriptions
+  ///   (those have not been set up yet during the connecting phase).
+  /// - Emits [BleConnectionStatus.disconnected] immediately, returning the UI
+  ///   to the idle device-list state without error.
+  Future<void> cancelConnecting() async {
+    if (_snapshot.status != BleConnectionStatus.connecting) return;
+
+    // Set the flag BEFORE any await so the connect() catch block sees it
+    // synchronously when it resumes after device.disconnect() throws.
+    _connectCancelled = true;
+
+    // Cancel the connection-state subscription to prevent _handleDisconnect()
+    // from firing as a side effect of calling device.disconnect() below.
+    await _connStateSub?.cancel();
+    _connStateSub = null;
+
+    final device = _device;
+    _device = null;
+    _connectedDevice = null;
+    _digitalChar = null;
+    _authChar = null;
+    _statusChar = null;
+    _heartbeatChar = null;
+
+    // Abort the pending BLE connect attempt.
+    if (device != null) {
+      try {
+        await device.disconnect();
+      } catch (_) {
+        // Best-effort — the connect() rejection is what matters.
+      }
+    }
+
+    _connectCancelled = false;
+    _emit(BleConnectionStatus.disconnected);
   }
 
   Future<void> disconnect({bool emitState = true}) async {

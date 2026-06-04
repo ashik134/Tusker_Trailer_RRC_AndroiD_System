@@ -161,11 +161,13 @@ class ConnectedDeviceCard extends StatelessWidget {
   const ConnectedDeviceCard({
     super.key,
     required this.device,
-    required this.onDisconnect,
+    required this.onCancel,
+    this.isCancelling = false,
   });
 
   final BleScanDevice device;
-  final VoidCallback onDisconnect;
+  final VoidCallback onCancel;
+  final bool isCancelling;
 
   @override
   Widget build(BuildContext context) {
@@ -237,7 +239,7 @@ class ConnectedDeviceCard extends StatelessWidget {
               ),
 
               // Status / Connecting indicator
-              const SizedBox(
+              SizedBox(
                 width: 30,
                 height: 30,
                 child: CustomCircularStepProgressIndicator(
@@ -245,19 +247,20 @@ class ConnectedDeviceCard extends StatelessWidget {
                   currentStep: 12,
                   stepSize: 20,
                   selectedColor: Colors.red,
-                  unselectedColor: Color.fromARGB(255, 71, 100, 188),
+                  unselectedColor: const Color.fromARGB(255, 71, 100, 188),
                   padding: math.pi / 80,
                   width: 30,
                   height: 30,
                   startingAngle: -math.pi * 2 / 3,
                   arcSize: math.pi * 2 / 3 * 2,
-                  gradientColor: LinearGradient(
+                  gradientColor: const LinearGradient(
                     colors: [
                       Color.fromARGB(255, 54, 184, 244),
                       Color.fromARGB(255, 111, 152, 224),
                     ],
                   ),
-                  isAnimating: true,
+                  // Stop rotating during cancellation to signal the abort
+                  isAnimating: !isCancelling,
                 ),
               ),
             ],
@@ -270,16 +273,29 @@ class ConnectedDeviceCard extends StatelessWidget {
 
           const SizedBox(height: 4),
 
-          // ── Disconnect Button
+          // ── Cancel Button
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
-              onPressed: onDisconnect,
-              icon: const Icon(Icons.bluetooth_disabled_rounded, size: 16),
-              label: const Text('DISCONNECT'),
+              onPressed: isCancelling ? null : onCancel,
+              icon: isCancelling
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: ConnectionColors.textSecondary,
+                      ),
+                    )
+                  : const Icon(Icons.close_rounded, size: 16),
+              label: Text(isCancelling ? 'CANCELLING...' : 'CANCEL'),
               style: OutlinedButton.styleFrom(
-                foregroundColor: ConnectionColors.error,
-                side: BorderSide(color: ConnectionColors.error.withAlpha(80)),
+                foregroundColor: ConnectionColors.textSecondary,
+                side: BorderSide(
+                  color: isCancelling
+                      ? ConnectionColors.border.withAlpha(80)
+                      : ConnectionColors.border,
+                ),
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -289,7 +305,7 @@ class ConnectedDeviceCard extends StatelessWidget {
                   fontWeight: FontWeight.w700,
                   letterSpacing: 0.8,
                 ),
-                backgroundColor: ConnectionColors.error.withAlpha(10),
+                backgroundColor: ConnectionColors.surfaceAlt,
               ),
             ),
           ),
