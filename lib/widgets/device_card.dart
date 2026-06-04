@@ -37,16 +37,17 @@ class AvailableDeviceCard extends StatelessWidget {
         child: Row(
           children: [
             Container(
-              width: 44,
-              height: 44,
+              width: 40,
+              height: 40,
               decoration: BoxDecoration(
                 color: ConnectionColors.primarySoft,
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(
-                Icons.developer_board_rounded,
+              child: Image.asset(
+                'assets/icons/wireless-antenna.png',
                 color: ConnectionColors.primary,
-                size: 23,
+                width: 20,
+                height: 20,
               ),
             ),
             const SizedBox(width: 10),
@@ -137,17 +138,6 @@ class _SignalPill extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(width: 8),
-        // SizedBox(
-        //   width: 36,
-        //   child: LinearProgressIndicator(
-        //     value: barValue,
-        //     minHeight: 4,
-        //     borderRadius: BorderRadius.circular(4),
-        //     backgroundColor: tone.withValues(alpha: 0.22),
-        //     valueColor: AlwaysStoppedAnimation<Color>(tone),
-        //   ),
-        // ),
       ],
     );
   }
