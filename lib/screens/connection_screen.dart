@@ -46,12 +46,28 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
       _lastShownError = error;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
+
+        // Choose a context-aware title: timeout/unreachable errors get a
+        // specific "Device Unavailable" label so the operator understands
+        // immediately that the PLC is out of range, not a software fault.
+        final errorLower = error.toLowerCase();
+        final bool isUnreachable =
+            errorLower.contains('unreachable') ||
+            errorLower.contains('timed out') ||
+            errorLower.contains('timeout') ||
+            errorLower.contains('out of range') ||
+            errorLower.contains('offline');
+        final String snackTitle =
+            isUnreachable ? 'Device Unavailable' : 'Connection Error';
+
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
           ..showSnackBar(
             SnackBar(
               behavior: SnackBarBehavior.floating,
-              backgroundColor: ConnectionColors.error,
+              backgroundColor: isUnreachable
+                  ? ConnectionColors.warning
+                  : ConnectionColors.error,
               margin: const EdgeInsets.all(16),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
@@ -68,8 +84,10 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                       color: Colors.white.withAlpha(51),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(
-                      Icons.error_outline_rounded,
+                    child: Icon(
+                      isUnreachable
+                          ? Icons.wifi_off_rounded
+                          : Icons.error_outline_rounded,
                       color: Colors.white,
                       size: 20,
                     ),
@@ -80,9 +98,9 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Text(
-                          'Connection Error',
-                          style: TextStyle(
+                        Text(
+                          snackTitle,
+                          style: const TextStyle(
                             color: Colors.white,
                             fontSize: 13,
                             fontWeight: FontWeight.w700,
@@ -475,13 +493,27 @@ class _StatusBanner extends StatelessWidget {
       );
     }
     if (c.connectionState.status == BleConnectionStatus.error) {
+      final msg = c.connectionState.message ?? 'An unexpected error occurred.';
+      final msgLower = msg.toLowerCase();
+      final bool isUnreachable =
+          msgLower.contains('unreachable') ||
+          msgLower.contains('timed out') ||
+          msgLower.contains('timeout') ||
+          msgLower.contains('out of range') ||
+          msgLower.contains('offline');
       return _BannerData(
-        icon: Icons.error_outline_rounded,
-        title: 'Connection Error',
-        subtitle: c.connectionState.message ?? 'An unexpected error occurred.',
-        color: ConnectionColors.error,
-        bg: ConnectionColors.errorBg,
-        border: ConnectionColors.errorBorder,
+        icon: isUnreachable
+            ? Icons.wifi_off_rounded
+            : Icons.error_outline_rounded,
+        title: isUnreachable ? 'Device Unavailable' : 'Connection Error',
+        subtitle: msg,
+        color: isUnreachable ? ConnectionColors.warning : ConnectionColors.error,
+        bg: isUnreachable
+            ? ConnectionColors.warningBg
+            : ConnectionColors.errorBg,
+        border: isUnreachable
+            ? ConnectionColors.warningBorder
+            : ConnectionColors.errorBorder,
       );
     }
     if (c.isConnected) {
@@ -719,8 +751,10 @@ class _DevicesPanel extends StatefulWidget {
 }
 
 class _DevicesPanelState extends State<_DevicesPanel>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late final AnimationController _spinCtrl;
+  late final AnimationController _scanPulseCtrl;
+  late final Animation<double> _scanPulseAnim;
 
   @override
   void initState() {
@@ -729,11 +763,33 @@ class _DevicesPanelState extends State<_DevicesPanel>
       vsync: this,
       duration: const Duration(milliseconds: 650),
     );
+    _scanPulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    );
+    _scanPulseAnim = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _scanPulseCtrl, curve: Curves.easeInOut),
+    );
+    if (widget.controller.isScanning) _scanPulseCtrl.repeat();
+  }
+
+  @override
+  void didUpdateWidget(_DevicesPanel old) {
+    super.didUpdateWidget(old);
+    final wasScanning = old.controller.isScanning;
+    final isScanning = widget.controller.isScanning;
+    if (isScanning && !wasScanning) {
+      _scanPulseCtrl.repeat();
+    } else if (!isScanning && wasScanning) {
+      _scanPulseCtrl.stop();
+      _scanPulseCtrl.reset();
+    }
   }
 
   @override
   void dispose() {
     _spinCtrl.dispose();
+    _scanPulseCtrl.dispose();
     super.dispose();
   }
 
@@ -830,6 +886,22 @@ class _DevicesPanelState extends State<_DevicesPanel>
             ),
           ),
           const Divider(height: 1, color: ConnectionColors.divider),
+          // Subtle scan-sweep bar — visible only while scanning so users
+          // perceive continuous activity even during the radio pause cycle.
+          AnimatedBuilder(
+            animation: _scanPulseAnim,
+            builder: (_, __) {
+              final scanning = widget.controller.isScanning;
+              if (!scanning) return const SizedBox.shrink();
+              return SizedBox(
+                height: 2,
+                child: CustomPaint(
+                  painter: _ScanSweepPainter(progress: _scanPulseAnim.value),
+                  size: const Size(double.infinity, 2),
+                ),
+              );
+            },
+          ),
           Expanded(
             child: Stack(
               children: [
@@ -949,10 +1021,53 @@ class _DevicesPanelState extends State<_DevicesPanel>
 // Empty State View
 // ═══════════════════════════════════════════════════════════
 
-class _EmptyDeviceState extends StatelessWidget {
+class _EmptyDeviceState extends StatefulWidget {
   const _EmptyDeviceState({required this.scanning, super.key});
 
   final bool scanning;
+
+  @override
+  State<_EmptyDeviceState> createState() => _EmptyDeviceStateState();
+}
+
+class _EmptyDeviceStateState extends State<_EmptyDeviceState>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulseCtrl;
+  late final Animation<double> _scaleAnim;
+  late final Animation<double> _opacityAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    );
+    _scaleAnim = Tween<double>(begin: 0.75, end: 1.45).animate(
+      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeOut),
+    );
+    _opacityAnim = Tween<double>(begin: 0.55, end: 0.0).animate(
+      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeOut),
+    );
+    if (widget.scanning) _pulseCtrl.repeat();
+  }
+
+  @override
+  void didUpdateWidget(_EmptyDeviceState old) {
+    super.didUpdateWidget(old);
+    if (widget.scanning && !old.scanning) {
+      _pulseCtrl.repeat();
+    } else if (!widget.scanning && old.scanning) {
+      _pulseCtrl.stop();
+      _pulseCtrl.reset();
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulseCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -962,25 +1077,59 @@ class _EmptyDeviceState extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Container(
-            //   width: 74,
-            //   height: 74,
-            //   decoration: BoxDecoration(
-            //     color: ConnectionColors.primarySoft,
-            //     borderRadius: BorderRadius.circular(24),
-            //     border: Border.all(color: ConnectionColors.border),
-            //   ),
-            //   child: Icon(
-            //     scanning ? Icons.radar_rounded : Icons.bluetooth_rounded,
-            //     color: scanning
-            //         ? ConnectionColors.scanning
-            //         : ConnectionColors.textMuted,
-            //     size: 36,
-            //   ),
-            // ),
-            const SizedBox(height: 14),
+            if (widget.scanning) ...[
+              SizedBox(
+                width: 80,
+                height: 80,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    // Outer pulse ring
+                    AnimatedBuilder(
+                      animation: _pulseCtrl,
+                      builder: (_, __) => Opacity(
+                        opacity: _opacityAnim.value,
+                        child: Transform.scale(
+                          scale: _scaleAnim.value,
+                          child: Container(
+                            width: 72,
+                            height: 72,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: ConnectionColors.scanning,
+                                width: 2,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    // Center radar icon
+                    Container(
+                      width: 56,
+                      height: 56,
+                      decoration: BoxDecoration(
+                        color: ConnectionColors.scanningBg,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: ConnectionColors.scanningBorder,
+                        ),
+                      ),
+                      child: const Icon(
+                        Icons.radar_rounded,
+                        color: ConnectionColors.scanning,
+                        size: 30,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ] else
+              const SizedBox(height: 14),
             Text(
-              scanning ? 'Scanning for Devices...' : 'No Controllers Found',
+              widget.scanning ? 'Scanning for Devices...' : 'No Controllers Found',
               textAlign: TextAlign.center,
               style: const TextStyle(
                 color: ConnectionColors.textPrimary,
@@ -990,7 +1139,7 @@ class _EmptyDeviceState extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              scanning
+              widget.scanning
                   ? 'Looking for ${BLEConstants.scanNamePrefix}* nearby.'
                   : 'Power on the PLC14 controller and keep it in BLE range.',
               textAlign: TextAlign.center,
@@ -1005,6 +1154,41 @@ class _EmptyDeviceState extends StatelessWidget {
       ),
     );
   }
+}
+
+// ═══════════════════════════════════════════════════════════
+// Scan sweep bar painter
+// ═══════════════════════════════════════════════════════════
+
+/// Renders a 2-pixel-high gradient sweep that travels left→right on repeat.
+/// Gives a radar-sweep feel that bridges visual gaps between BLE burst cycles.
+class _ScanSweepPainter extends CustomPainter {
+  const _ScanSweepPainter({required this.progress});
+
+  final double progress;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const sweepWidth = 120.0;
+    final center = progress * (size.width + sweepWidth) - sweepWidth / 2;
+    final left = center - sweepWidth / 2;
+    final right = center + sweepWidth / 2;
+
+    final rect = Rect.fromLTWH(left, 0, sweepWidth, size.height);
+    final paint = Paint()
+      ..shader = LinearGradient(
+        colors: [
+          ConnectionColors.scanning.withAlpha(0),
+          ConnectionColors.scanning.withAlpha(200),
+          ConnectionColors.scanning.withAlpha(0),
+        ],
+      ).createShader(rect);
+
+    canvas.drawRect(rect, paint);
+  }
+
+  @override
+  bool shouldRepaint(_ScanSweepPainter old) => old.progress != progress;
 }
 
 // ═══════════════════════════════════════════════════════════

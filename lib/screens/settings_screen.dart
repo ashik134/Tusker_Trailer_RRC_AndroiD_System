@@ -64,14 +64,14 @@ class SettingsScreen extends StatelessWidget {
               const SizedBox(height: 24),
 
               // ── Section: Authorization Status ─────────────────────────────
-              const _SectionHeader(
-                icon: Icons.verified_user_rounded,
-                label: 'AUTHORIZATION STATUS',
-                iconColor: AppColors.info,
-              ),
-              const SizedBox(height: 8),
-              _AuthorizationStatusCard(controller: controller),
-              const SizedBox(height: 24),
+              // const _SectionHeader(
+              //   icon: Icons.verified_user_rounded,
+              //   label: 'AUTHORIZATION STATUS',
+              //   iconColor: AppColors.info,
+              // ),
+              // const SizedBox(height: 8),
+              // _AuthorizationStatusCard(controller: controller),
+              // const SizedBox(height: 24),
 
               // ── Section: Biometric Security ───────────────────────────────
               const _SectionHeader(
@@ -184,10 +184,7 @@ class _DeviceIdentityCardState extends State<_DeviceIdentityCard> {
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 3,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: AppColors.accentSoft,
                   borderRadius: BorderRadius.circular(6),
@@ -271,9 +268,7 @@ class _DeviceIdentityCardState extends State<_DeviceIdentityCard> {
             children: [
               Expanded(
                 child: _ActionButton(
-                  icon: _copied
-                      ? Icons.check_rounded
-                      : Icons.copy_rounded,
+                  icon: _copied ? Icons.check_rounded : Icons.copy_rounded,
                   label: _copied ? 'Copied' : 'Copy Device ID',
                   color: _copied ? AppColors.success : AppColors.accent,
                   onTap: id.isEmpty ? null : _copyDeviceId,
@@ -445,10 +440,7 @@ class _BiometricCard extends StatelessWidget {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 4,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: enrolled
                       ? AppColors.successSoft
@@ -458,9 +450,7 @@ class _BiometricCard extends StatelessWidget {
                 child: Text(
                   enrolled ? 'ON' : 'OFF',
                   style: TextStyle(
-                    color: enrolled
-                        ? AppColors.success
-                        : AppColors.disabled,
+                    color: enrolled ? AppColors.success : AppColors.disabled,
                     fontSize: 10,
                     fontWeight: FontWeight.w800,
                     letterSpacing: 0.8,
@@ -471,10 +461,7 @@ class _BiometricCard extends StatelessWidget {
           ),
           if (enrolled) ...[
             const SizedBox(height: 14),
-            Container(
-              height: 1,
-              color: AppColors.border,
-            ),
+            Container(height: 1, color: AppColors.border),
             const SizedBox(height: 14),
             _ActionButton(
               icon: Icons.delete_outline_rounded,
@@ -554,36 +541,36 @@ class _SecurityInfoCard extends StatelessWidget {
           _SecurityFact(
             icon: Icons.lock_rounded,
             label: 'AES-128-GCM Encrypted Communication',
-            detail:
-                'All BLE traffic is encrypted and authenticated. Replay attacks '
-                'are prevented by a monotonic session counter.',
+            // detail:
+            //     'All BLE traffic is encrypted and authenticated. Replay attacks '
+            //     'are prevented by a monotonic session counter.',
           ),
           SizedBox(height: 12),
           _SecurityFact(
             icon: Icons.verified_user_rounded,
             label: 'Triple Authorization Gate',
-            detail:
-                'Control access requires (1) trusted device, (2) valid operator '
-                'credentials, and (3) an active encrypted session — all three '
-                'must pass.',
+            // detail:
+            //     'Control access requires (1) trusted device, (2) valid operator '
+            //     'credentials, and (3) an active encrypted session — all three '
+            //     'must pass.',
           ),
           SizedBox(height: 12),
           _SecurityFact(
             icon: Icons.phonelink_lock_rounded,
             label: 'Device Identity — Android Keystore',
-            detail:
-                'The Device ID is stored in hardware-backed Android Keystore '
-                '(EncryptedSharedPreferences). It is never transmitted in '
-                'plaintext.',
+            // detail:
+            //     'The Device ID is stored in hardware-backed Android Keystore '
+            //     '(EncryptedSharedPreferences). It is never transmitted in '
+            //     'plaintext.',
           ),
           SizedBox(height: 12),
           _SecurityFact(
             icon: Icons.shield_rounded,
             label: 'Fail-Safe Default',
-            detail:
-                'On any validation failure the PLC enters safe state: all '
-                'outputs OFF, heartbeat ignored, session cleared. The system '
-                'never defaults to an unsafe state.',
+            // detail:
+            //     'On any validation failure the PLC enters safe state: all '
+            //     'outputs OFF, heartbeat ignored, session cleared. The system '
+            //     'never defaults to an unsafe state.',
           ),
         ],
       ),
@@ -595,12 +582,12 @@ class _SecurityFact extends StatelessWidget {
   const _SecurityFact({
     required this.icon,
     required this.label,
-    required this.detail,
+    // required this.detail,
   });
 
   final IconData icon;
   final String label;
-  final String detail;
+  // final String detail;
 
   @override
   Widget build(BuildContext context) {
@@ -630,14 +617,14 @@ class _SecurityFact extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 3),
-              Text(
-                detail,
-                style: const TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 11.5,
-                  height: 1.45,
-                ),
-              ),
+              // Text(
+              //   detail,
+              //   style: const TextStyle(
+              //     color: AppColors.textMuted,
+              //     fontSize: 11.5,
+              //     height: 1.45,
+              //   ),
+              // ),
             ],
           ),
         ),
@@ -687,11 +674,7 @@ class _ActiveSessionCard extends StatelessWidget {
 }
 
 class _InfoRow extends StatelessWidget {
-  const _InfoRow({
-    required this.label,
-    required this.value,
-    this.valueColor,
-  });
+  const _InfoRow({required this.label, required this.value, this.valueColor});
 
   final String label;
   final String value;
@@ -776,9 +759,7 @@ class _ActionButton extends StatelessWidget {
       child: Container(
         height: 44,
         decoration: BoxDecoration(
-          color: outlined
-              ? Colors.transparent
-              : color.withValues(alpha: 0.15),
+          color: outlined ? Colors.transparent : color.withValues(alpha: 0.15),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
             color: onTap != null

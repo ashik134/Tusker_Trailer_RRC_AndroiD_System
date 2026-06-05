@@ -20,32 +20,51 @@ class AvailableDeviceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final staleStatus = device.staleStatus;
+    final isStale = staleStatus != DeviceStaleStatus.active;
+    final isExpired = staleStatus == DeviceStaleStatus.expired;
+
+    // Dimmer when another device is connecting; slightly dimmer when stale.
+    final double opacity = connecting ? 0.45 : (isExpired ? 0.70 : 1.0);
+
+    final Color borderColor = connecting
+        ? ConnectionColors.border.withAlpha(120)
+        : isStale
+        ? ConnectionColors.warningBorder
+        : ConnectionColors.border;
+
+    final Color cardBg = isStale
+        ? ConnectionColors.warningBg.withAlpha(90)
+        : ConnectionColors.surfaceAlt;
+
     return AnimatedOpacity(
-      opacity: connecting ? 0.45 : 1.0,
-      duration: const Duration(milliseconds: 250),
-      child: Container(
+      opacity: opacity,
+      duration: const Duration(milliseconds: 300),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: ConnectionColors.surfaceAlt,
+          color: cardBg,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: connecting
-                ? ConnectionColors.border.withAlpha(120)
-                : ConnectionColors.border,
-          ),
+          border: Border.all(color: borderColor),
         ),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Container(
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: ConnectionColors.primarySoft,
+                color: isStale
+                    ? ConnectionColors.warningBg
+                    : ConnectionColors.primarySoft,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Image.asset(
                 'assets/icons/wireless-antenna.png',
-                color: ConnectionColors.primary,
+                color: isStale
+                    ? ConnectionColors.warning
+                    : ConnectionColors.primary,
                 width: 20,
                 height: 20,
               ),
@@ -59,8 +78,10 @@ class AvailableDeviceCard extends StatelessWidget {
                     device.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: ConnectionColors.textPrimary,
+                    style: TextStyle(
+                      color: isStale
+                          ? ConnectionColors.textSecondary
+                          : ConnectionColors.textPrimary,
                       fontSize: 14,
                       fontWeight: FontWeight.w800,
                     ),
@@ -76,8 +97,11 @@ class AvailableDeviceCard extends StatelessWidget {
                       fontFamily: 'monospace',
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  _SignalPill(rssi: device.rssi, label: device.signalLabel),
+                  const SizedBox(height: 6),
+                  if (isStale)
+                    _StaleIndicatorRow(isExpired: isExpired)
+                  else
+                    _SignalPill(rssi: device.rssi, label: device.signalLabel),
                 ],
               ),
             ),
@@ -86,28 +110,102 @@ class AvailableDeviceCard extends StatelessWidget {
               const SizedBox(width: 8),
               SizedBox(
                 width: 92,
-                child: FilledButton(
-                  onPressed: onConnect,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: ConnectionColors.primary,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 11),
-                    textStyle: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.6,
-                    ),
-                  ),
-                  child: const Text('CONNECT'),
-                ),
+                child: isStale
+                    ? OutlinedButton(
+                        onPressed: onConnect,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: ConnectionColors.warning,
+                          side: BorderSide(
+                            color: ConnectionColors.warningBorder,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 11),
+                          textStyle: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.5,
+                          ),
+                          backgroundColor: ConnectionColors.warningBg,
+                        ),
+                        child: const Text('CONNECT'),
+                      )
+                    : FilledButton(
+                        onPressed: onConnect,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: ConnectionColors.primary,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 11),
+                          textStyle: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.6,
+                          ),
+                        ),
+                        child: const Text('CONNECT'),
+                      ),
               ),
             ],
           ],
         ),
       ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// Stale Indicator Row — shown below device info when no recent advertisement
+// ═══════════════════════════════════════════════════════════
+
+class _StaleIndicatorRow extends StatelessWidget {
+  const _StaleIndicatorRow({required this.isExpired});
+
+  final bool isExpired;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(
+          isExpired
+              ? Icons.wifi_off_rounded
+              : Icons.signal_wifi_statusbar_connected_no_internet_4_rounded,
+          size: 11,
+          color: ConnectionColors.warning,
+        ),
+        const SizedBox(width: 4),
+        Text(
+          isExpired ? 'Not advertising' : 'Signal weak',
+          style: const TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            color: ConnectionColors.warning,
+            letterSpacing: 0.2,
+          ),
+        ),
+        const SizedBox(width: 1),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+          decoration: BoxDecoration(
+            color: ConnectionColors.warningBg,
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: ConnectionColors.warningBorder),
+          ),
+          child: Text(
+            isExpired ? 'OFFLINE?' : 'STALE',
+            style: const TextStyle(
+              fontSize: 5,
+              fontWeight: FontWeight.w800,
+              color: ConnectionColors.warning,
+              letterSpacing: 0,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -120,7 +218,7 @@ class _SignalPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tone = rssi >= -68
+    final Color tone = rssi >= -68
         ? ConnectionColors.connected
         : rssi >= -80
         ? ConnectionColors.warning
@@ -128,16 +226,22 @@ class _SignalPill extends StatelessWidget {
 
     return Row(
       children: [
-        Expanded(
-          child: Text(
-            '$rssi dBm ',
-            style: TextStyle(
-              color: tone,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-            ),
+        Icon(
+          Icons.signal_cellular_alt_rounded,
+          size: 12,
+          color: tone,
+        ),
+        const SizedBox(width: 5),
+        Text(
+          '$rssi dBm',
+          style: TextStyle(
+            color: tone,
+            fontSize: 10.5,
+            fontWeight: FontWeight.w700,
+            fontFamily: 'monospace',
           ),
         ),
+       
       ],
     );
   }

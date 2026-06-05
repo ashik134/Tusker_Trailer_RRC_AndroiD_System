@@ -77,12 +77,23 @@ class BleService {
   // the disconnection was intentionally triggered by the user.
   bool _connectCancelled = false;
 
-  // ── Device cache — prevents list flicker between 8-second scan bursts ────────
+  // ── Device cache — prevents list flicker during scan/pause cycles ──────────────
+  // lastSeenAt is embedded in BleScanDevice itself; no separate timestamp map needed.
   final Map<String, BleScanDevice> _deviceCache = {};
-  final Map<String, DateTime> _deviceLastSeen = {};
   Timer? _pruneTimer;
-  static const Duration _deviceStaleTimeout = Duration(seconds: 20);
-  static const Duration _pruneInterval = Duration(seconds: 5);
+  // Prune timer fires every 3 s so the UI can re-check each device's staleStatus
+  // (computed from DateTime.now() at render time) without a per-card timer.
+  static const Duration _deviceExpireTimeout = Duration(seconds: 15);
+  static const Duration _pruneInterval = Duration(seconds: 3);
+
+  // ── Scan cycle tuning ───────────────────────────────────────────────────────
+  // Active burst: 6 s lets Android balanced-mode deliver multiple ad windows.
+  // Pause: 1.5 s lets the radio rest; UI status stays 'scanning' throughout
+  // so device cards never flicker and the progress indicator keeps spinning.
+  // Session cap: 3 minutes prevents accidental indefinite drain in the field.
+  static const Duration _scanBurstDuration = Duration(seconds: 6);
+  static const Duration _scanPauseDuration = Duration(milliseconds: 1500);
+  static const Duration _maxScanSessionDuration = Duration(minutes: 3);
 
   void _emit(BleConnectionStatus status, {String? message}) {
     if (_isDisposing || _connectionController.isClosed) {
@@ -140,13 +151,22 @@ class BleService {
             continue;
           }
 
-          final device = BleScanDevice.fromScanResult(result);
+          final device = BleScanDevice.fromScanResult(result); // lastSeenAt = now
           final existing = _deviceCache[device.id];
-          _deviceLastSeen[device.id] = now;
 
-          if (existing == null || existing.rssi != device.rssi) {
+          if (existing == null) {
+            // New device discovered.
             _deviceCache[device.id] = device;
             changed = true;
+          } else if (existing.rssi != device.rssi || existing.isStale) {
+            // RSSI changed, or device re-advertised after going stale — refresh fully
+            // so the stale indicator clears immediately on the next rebuild.
+            _deviceCache[device.id] = device;
+            changed = true;
+          } else {
+            // Freshen the lastSeenAt even when RSSI is unchanged, so the prune
+            // timer does not evict an actively advertising device.
+            _deviceCache[device.id] = existing.copyWith(lastSeenAt: now);
           }
         }
 
@@ -165,10 +185,21 @@ class BleService {
       },
     );
 
+    // Track session start so we automatically stop after 3 minutes.
+    final sessionDeadline = DateTime.now().add(_maxScanSessionDuration);
+
     while (_scanShouldContinue && !_isDisposing) {
+      // Respect the 3-minute session cap.
+      final remaining = sessionDeadline.difference(DateTime.now());
+      if (remaining.inSeconds < 1) break;
+
+      // Clamp the burst to whatever session time is left.
+      final burst =
+          remaining < _scanBurstDuration ? remaining : _scanBurstDuration;
+
       try {
         await FlutterBluePlus.startScan(
-          timeout: const Duration(seconds: 8),
+          timeout: burst,
           androidScanMode: AndroidScanMode.balanced,
         );
         await FlutterBluePlus.isScanning.where((s) => !s).first;
@@ -176,8 +207,10 @@ class BleService {
         break;
       }
       if (!_scanShouldContinue || _isDisposing) break;
-      // Brief gap between bursts to let the radio rest.
-      await Future.delayed(const Duration(milliseconds: 400));
+      // 1.5 s pause lets the BLE radio rest between bursts.
+      // The connection status stays 'scanning' throughout this gap so the
+      // UI never shows a stopped state and device cards remain stable.
+      await Future.delayed(_scanPauseDuration);
     }
 
     _scanResultsSub?.cancel();
@@ -192,7 +225,6 @@ class BleService {
     _pruneTimer?.cancel();
     _pruneTimer = null;
     _deviceCache.clear();
-    _deviceLastSeen.clear();
     await FlutterBluePlus.stopScan();
     _scanResultsSub?.cancel();
     _scanResultsSub = null;
@@ -203,19 +235,27 @@ class BleService {
 
   void _pruneStaleDevices() {
     final now = DateTime.now();
-    final staleIds = _deviceLastSeen.entries
-        .where((e) => now.difference(e.value) > _deviceStaleTimeout)
+    final expiredIds = _deviceCache.entries
+        .where((e) => now.difference(e.value.lastSeenAt) > _deviceExpireTimeout)
         .map((e) => e.key)
         .toList();
 
-    if (staleIds.isEmpty) return;
-
-    for (final id in staleIds) {
+    for (final id in expiredIds) {
       _deviceCache.remove(id);
-      _deviceLastSeen.remove(id);
     }
-    debugPrint('[BLE] Pruned ${staleIds.length} stale device(s) from cache.');
-    _scanController.add(List.unmodifiable(_deviceCache.values.toList()));
+    if (expiredIds.isNotEmpty) {
+      debugPrint(
+        '[BLE] Removed ${expiredIds.length} expired device(s) from cache '
+        '(silent > ${_deviceExpireTimeout.inSeconds}s).',
+      );
+    }
+
+    // Always re-emit when the cache has items so every widget rebuild
+    // re-evaluates device.staleStatus (which calls DateTime.now() internally).
+    // This is what drives the visual stale indicator without a per-card timer.
+    if (_deviceCache.isNotEmpty || expiredIds.isNotEmpty) {
+      _scanController.add(List.unmodifiable(_deviceCache.values.toList()));
+    }
   }
 
   // ── Connection ─────────────────────────────────────────────────────────────
@@ -255,7 +295,7 @@ class BleService {
     try {
       await _device!.connect(
         autoConnect: false,
-        timeout: const Duration(seconds: 15),
+        timeout: const Duration(seconds: 8),
         license: License.commercial,
       );
       await _discoverServices();
@@ -263,11 +303,31 @@ class BleService {
       // If the failure was triggered by cancelConnecting(), let that method
       // own the state transition — do not emit an error here.
       if (_connectCancelled) return;
+
+      // Clean up connection-state subscription before emitting error so
+      // the BLE disconnect event that follows does not trigger _handleDisconnect
+      // and overwrite the error state we are about to emit.
+      _connStateSub?.cancel();
+      _connStateSub = null;
+      _device = null;
       _connectedDevice = null;
-      _emit(
-        BleConnectionStatus.error,
-        message: 'Connection failed: ${e.toString()}',
-      );
+
+      final String message;
+      final errStr = e.toString().toLowerCase();
+      if (errStr.contains('timed out') || errStr.contains('timeout')) {
+        message = 'Controller unreachable — device is out of range or offline.';
+        // Auto-clear the error banner after 3 s so the UI returns to the idle
+        // scan state without requiring an explicit user action.
+        Future.delayed(const Duration(seconds: 3), () {
+          if (!_isDisposing && _snapshot.status == BleConnectionStatus.error) {
+            _emit(BleConnectionStatus.disconnected);
+          }
+        });
+      } else {
+        message = 'Connection failed: ${e.toString()}';
+      }
+
+      _emit(BleConnectionStatus.error, message: message);
       _logger.e('Connection failed: ${e.toString()}');
       return;
     }
