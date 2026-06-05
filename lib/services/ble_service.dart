@@ -72,6 +72,15 @@ class BleService {
   // ── Continuous scan control ─────────────────────────────────────────────────
   bool _scanShouldContinue = false;
 
+  // True while the session is intentionally paused (screen navigation or app
+  // background). Deadline and device cache are preserved so the session can
+  // be resumed seamlessly when the user returns to the Scan screen.
+  bool _scanPaused = false;
+
+  // Persisted across pause/resume so the 3-minute cap counts real elapsed time
+  // regardless of how many pause/resume cycles occur. Null when no session.
+  DateTime? _scanSessionDeadline;
+
   // Set to true by cancelConnecting() before aborting the in-flight connect()
   // call. Prevents the connect() catch block from emitting an error state when
   // the disconnection was intentionally triggered by the user.
@@ -109,12 +118,13 @@ class BleService {
 
   // ── Scanning ───────────────────────────────────────────────────────────────
 
+  /// Starts a brand-new 3-minute scan session.
+  /// Cancels any in-progress session (without clearing the device cache)
+  /// and immediately re-emits cached devices so the UI is populated before
+  /// the first BLE advertisement arrives.
   Future<void> startScan() async {
-    // Stop the previous scan loop and subscription WITHOUT clearing the device
-    // cache. Cached devices are immediately re-emitted below so they appear
-    // on screen the instant SCAN is tapped, before BLE has had a chance to
-    // re-discover them (important with balanced scan mode).
     _scanShouldContinue = false;
+    _scanPaused = false;
     _pruneTimer?.cancel();
     _pruneTimer = null;
     if (FlutterBluePlus.isScanningNow) {
@@ -123,16 +133,70 @@ class BleService {
     await _scanResultsSub?.cancel();
     _scanResultsSub = null;
 
+    _scanSessionDeadline = DateTime.now().add(_maxScanSessionDuration);
+    await _startOrResumeScanSession();
+  }
+
+  /// Pauses the active scan session — stops the BLE radio burst but preserves
+  /// the device cache, prune timer, and session deadline so [resumeScan] can
+  /// pick up exactly where it left off.
+  ///
+  /// The connection status intentionally stays 'scanning' during the pause
+  /// so that no UI resets occur while the user is on another screen.
+  Future<void> pauseScan() async {
+    if (_scanSessionDeadline == null) return; // no active session
+    if (_scanPaused) return; // already paused
+    _scanPaused = true;
+    _scanShouldContinue = false;
+    if (FlutterBluePlus.isScanningNow) {
+      await FlutterBluePlus.stopScan();
+    }
+    await _scanResultsSub?.cancel();
+    _scanResultsSub = null;
+    // _deviceCache, _pruneTimer, and _scanSessionDeadline are all preserved.
+    // Status remains 'scanning' — no state emission needed.
+  }
+
+  /// Resumes a previously paused scan session using the preserved deadline.
+  /// No-op if no session is active or if the session expired while paused.
+  Future<void> resumeScan() async {
+    if (_scanShouldContinue) return; // loop already running
+    final deadline = _scanSessionDeadline;
+    if (deadline == null) return; // no session to resume
+
+    // Session expired while paused — finalize cleanly.
+    if (deadline.difference(DateTime.now()).inSeconds < 1) {
+      _scanPaused = false;
+      _scanSessionDeadline = null;
+      _pruneTimer?.cancel();
+      _pruneTimer = null;
+      if (_snapshot.status == BleConnectionStatus.scanning) {
+        _emit(BleConnectionStatus.disconnected);
+      }
+      return;
+    }
+
+    _scanPaused = false;
+    await _scanResultsSub?.cancel();
+    _scanResultsSub = null;
+    await _startOrResumeScanSession();
+  }
+
+  /// Core scan loop shared by [startScan] and [resumeScan].
+  /// Attaches the results subscription, runs burst/pause cycles until the
+  /// session deadline expires or [_scanShouldContinue] is cleared, then
+  /// finalizes the status (or leaves it as 'scanning' if merely paused).
+  Future<void> _startOrResumeScanSession() async {
     _emit(BleConnectionStatus.scanning);
     _scanShouldContinue = true;
 
-    // Re-emit the cache immediately so the UI shows previously seen devices.
+    // Re-emit cache immediately so the UI shows previously seen devices.
     if (_deviceCache.isNotEmpty) {
       _scanController.add(List.unmodifiable(_deviceCache.values.toList()));
     }
 
-    // Start pruning timer to remove devices that stop advertising.
-    _pruneTimer = Timer.periodic(_pruneInterval, (_) => _pruneStaleDevices());
+    // Ensure prune timer is running (no-op if already active).
+    _pruneTimer ??= Timer.periodic(_pruneInterval, (_) => _pruneStaleDevices());
 
     _scanResultsSub = FlutterBluePlus.scanResults.listen(
       (results) {
@@ -155,17 +219,12 @@ class BleService {
           final existing = _deviceCache[device.id];
 
           if (existing == null) {
-            // New device discovered.
             _deviceCache[device.id] = device;
             changed = true;
           } else if (existing.rssi != device.rssi || existing.isStale) {
-            // RSSI changed, or device re-advertised after going stale — refresh fully
-            // so the stale indicator clears immediately on the next rebuild.
             _deviceCache[device.id] = device;
             changed = true;
           } else {
-            // Freshen the lastSeenAt even when RSSI is unchanged, so the prune
-            // timer does not evict an actively advertising device.
             _deviceCache[device.id] = existing.copyWith(lastSeenAt: now);
           }
         }
@@ -185,15 +244,10 @@ class BleService {
       },
     );
 
-    // Track session start so we automatically stop after 3 minutes.
-    final sessionDeadline = DateTime.now().add(_maxScanSessionDuration);
-
     while (_scanShouldContinue && !_isDisposing) {
-      // Respect the 3-minute session cap.
-      final remaining = sessionDeadline.difference(DateTime.now());
+      final remaining = _scanSessionDeadline!.difference(DateTime.now());
       if (remaining.inSeconds < 1) break;
 
-      // Clamp the burst to whatever session time is left.
       final burst =
           remaining < _scanBurstDuration ? remaining : _scanBurstDuration;
 
@@ -207,26 +261,32 @@ class BleService {
         break;
       }
       if (!_scanShouldContinue || _isDisposing) break;
-      // 1.5 s pause lets the BLE radio rest between bursts.
-      // The connection status stays 'scanning' throughout this gap so the
-      // UI never shows a stopped state and device cards remain stable.
       await Future.delayed(_scanPauseDuration);
     }
 
-    _scanResultsSub?.cancel();
+    await _scanResultsSub?.cancel();
     _scanResultsSub = null;
-    if (_snapshot.status == BleConnectionStatus.scanning) {
-      _emit(BleConnectionStatus.disconnected);
+
+    // If the loop exited because it was paused, preserve the scanning status
+    // so the UI does not reset. Otherwise the session truly ended — finalize.
+    if (!_scanPaused) {
+      _scanSessionDeadline = null;
+      if (_snapshot.status == BleConnectionStatus.scanning) {
+        _emit(BleConnectionStatus.disconnected);
+      }
     }
   }
 
+  /// Stops scanning and clears the device cache (explicit user action).
   Future<void> stopScan() async {
-    _scanShouldContinue = false; // Break the continuous scan loop.
+    _scanShouldContinue = false;
+    _scanPaused = false;
+    _scanSessionDeadline = null;
     _pruneTimer?.cancel();
     _pruneTimer = null;
     _deviceCache.clear();
     await FlutterBluePlus.stopScan();
-    _scanResultsSub?.cancel();
+    await _scanResultsSub?.cancel();
     _scanResultsSub = null;
     if (FlutterBluePlus.isScanningNow) {
       await FlutterBluePlus.stopScan();
@@ -261,7 +321,10 @@ class BleService {
   // ── Connection ─────────────────────────────────────────────────────────────
 
   Future<void> connect(BleScanDevice scanDevice) async {
-    await stopScan();
+    // Scanning is intentionally NOT stopped here. The scan session continues
+    // running while the connection attempt is in progress so the device list
+    // remains stable and populated. The scan will be paused automatically by
+    // ConnectionScreen.dispose() when the UI navigates away to the auth screen.
     await disconnect(emitState: false);
 
     // Assign the target device BEFORE emitting 'connecting'.
@@ -1074,6 +1137,8 @@ class BleService {
 
   void dispose() {
     _isDisposing = true;
+    _scanPaused = false;
+    _scanSessionDeadline = null;
     _stopRssiPolling();
     _stopHeartbeat();
     _scanResultsSub?.cancel();

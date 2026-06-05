@@ -13,7 +13,7 @@ import 'package:tusker_trailer_rrc/services/permission_service.dart';
 import 'package:tusker_trailer_rrc/services/device_identity_service.dart';
 import 'package:tusker_trailer_rrc/utils/preferences.dart';
 
-class CraneController extends ChangeNotifier {
+class CraneController extends ChangeNotifier with WidgetsBindingObserver {
   final BleService _bleService = BleService();
   final PermissionService _permissionService = PermissionService();
   final AppPreferences _preferences = AppPreferences();
@@ -335,6 +335,7 @@ class CraneController extends ChangeNotifier {
       return;
     }
     _streamsAttached = true;
+    WidgetsBinding.instance.addObserver(this);
 
     _connStateSubscription = _bleService.connectionStream.listen((snapshot) {
       final previousStatus = _lastConnectionStatus;
@@ -418,6 +419,36 @@ class CraneController extends ChangeNotifier {
 
   //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   /// Device Scanning and Connection //////////////////////////////////////////////////////////////////////////////////
+  /// Pauses the active scan session without clearing the device cache.
+  /// Called by [ConnectionScreen] when it is removed from the widget tree
+  /// (navigation away) so the BLE radio is not left scanning on a dead screen.
+  Future<void> pauseScan() async {
+    await _bleService.pauseScan();
+  }
+
+  /// Resumes a previously paused scan session.
+  /// Called by [ConnectionScreen] when it first appears in the widget tree.
+  /// No-op if no session is active or if the session expired while paused.
+  Future<void> resumeScan() async {
+    if (!bluetoothReady || !permissionsGranted) return;
+    await _bleService.resumeScan();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached ||
+        state == AppLifecycleState.hidden) {
+      // App moved to background — stop the radio burst to save battery.
+      _bleService.pauseScan();
+    } else if (state == AppLifecycleState.resumed) {
+      // App returned to foreground — resume only if user is on the scan screen.
+      if (currentScreen == AppScreen.connection) {
+        resumeScan();
+      }
+    }
+  }
+
   Future<void> scanForDevices() async {
     _errorMessage = null;
 
@@ -924,6 +955,7 @@ class CraneController extends ChangeNotifier {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _connStateSubscription?.cancel();
     _scanSubscription?.cancel();
     _statusSubscription?.cancel();

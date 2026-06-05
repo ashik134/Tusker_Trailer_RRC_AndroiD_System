@@ -21,6 +21,9 @@ class ConnectionScreen extends StatefulWidget {
 class _ConnectionScreenState extends State<ConnectionScreen> {
   CraneController? _controller;
   String? _lastShownError;
+  // Guards the one-time resumeScan() call so it only fires on the first
+  // didChangeDependencies() invocation (i.e. when the screen first appears).
+  bool _didAttemptResumeOnAppear = false;
 
   @override
   void didChangeDependencies() {
@@ -31,11 +34,21 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
       _controller = controller;
       _controller!.addListener(_onControllerChanged);
     }
+    if (!_didAttemptResumeOnAppear) {
+      _didAttemptResumeOnAppear = true;
+      // Post-frame so we never call resumeScan() inside a build/layout pass.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) controller.resumeScan();
+      });
+    }
   }
 
   @override
   void dispose() {
     _controller?.removeListener(_onControllerChanged);
+    // Pause (not stop) the scan so the device cache and session deadline are
+    // preserved. resumeScan() will restart the bursts when the screen reappears.
+    _controller?.pauseScan();
     super.dispose();
   }
 
