@@ -119,9 +119,8 @@ class BleService {
   // ── Scanning ───────────────────────────────────────────────────────────────
 
   /// Starts a brand-new 3-minute scan session.
-  /// Cancels any in-progress session (without clearing the device cache)
-  /// and immediately re-emits cached devices so the UI is populated before
-  /// the first BLE advertisement arrives.
+  /// Clears the device cache so the new session starts with a clean slate
+  /// (any frozen devices from a prior session are discarded).
   Future<void> startScan() async {
     _scanShouldContinue = false;
     _scanPaused = false;
@@ -133,13 +132,14 @@ class BleService {
     await _scanResultsSub?.cancel();
     _scanResultsSub = null;
 
+    // Clear stale/frozen remnants — new session discovers devices fresh.
+    _deviceCache.clear();
     _scanSessionDeadline = DateTime.now().add(_maxScanSessionDuration);
     await _startOrResumeScanSession();
   }
 
-  /// Pauses the active scan session — stops the BLE radio burst but preserves
-  /// the device cache, prune timer, and session deadline so [resumeScan] can
-  /// pick up exactly where it left off.
+  /// Pauses the active scan session — stops the BLE radio burst, cancels the
+  /// prune timer, and freezes every device at its current [staleStatus].
   ///
   /// The connection status intentionally stays 'scanning' during the pause
   /// so that no UI resets occur while the user is on another screen.
@@ -153,8 +153,9 @@ class BleService {
     }
     await _scanResultsSub?.cancel();
     _scanResultsSub = null;
-    // _deviceCache, _pruneTimer, and _scanSessionDeadline are all preserved.
-    // Status remains 'scanning' — no state emission needed.
+    // Freeze device states so cards cannot age while the screen is inactive.
+    // Session deadline is preserved for resumeScan().
+    _freezeCache();
   }
 
   /// Resumes a previously paused scan session using the preserved deadline.
@@ -183,10 +184,13 @@ class BleService {
   }
 
   /// Core scan loop shared by [startScan] and [resumeScan].
-  /// Attaches the results subscription, runs burst/pause cycles until the
-  /// session deadline expires or [_scanShouldContinue] is cleared, then
-  /// finalizes the status (or leaves it as 'scanning' if merely paused).
+  /// Unfreezes the cache, runs burst/pause cycles until the session deadline
+  /// expires or [_scanShouldContinue] is cleared, then freezes the cache and
+  /// finalizes status (or leaves status as 'scanning' if merely paused).
   Future<void> _startOrResumeScanSession() async {
+    // Unfreeze devices so staleStatus resumes live computation and refresh
+    // lastSeenAt so devices start fresh rather than immediately stale.
+    _unfreezeCache();
     _emit(BleConnectionStatus.scanning);
     _scanShouldContinue = true;
 
@@ -195,8 +199,9 @@ class BleService {
       _scanController.add(List.unmodifiable(_deviceCache.values.toList()));
     }
 
-    // Ensure prune timer is running (no-op if already active).
-    _pruneTimer ??= Timer.periodic(_pruneInterval, (_) => _pruneStaleDevices());
+    // (Re)start the prune timer — always create a fresh one here.
+    _pruneTimer?.cancel();
+    _pruneTimer = Timer.periodic(_pruneInterval, (_) => _pruneStaleDevices());
 
     _scanResultsSub = FlutterBluePlus.scanResults.listen(
       (results) {
@@ -222,7 +227,7 @@ class BleService {
             _deviceCache[device.id] = device;
             changed = true;
           } else if (existing.rssi != device.rssi || existing.isStale) {
-            _deviceCache[device.id] = device;
+            _deviceCache[device.id] = device; 
             changed = true;
           } else {
             _deviceCache[device.id] = existing.copyWith(lastSeenAt: now);
@@ -267,6 +272,13 @@ class BleService {
     await _scanResultsSub?.cancel();
     _scanResultsSub = null;
 
+    await _scanResultsSub?.cancel();
+    _scanResultsSub = null;
+
+    // Freeze the cache regardless of why the loop exited so devices cannot
+    // age between now and the next scan session start.
+    _freezeCache();
+
     // If the loop exited because it was paused, preserve the scanning status
     // so the UI does not reset. Otherwise the session truly ended — finalize.
     if (!_scanPaused) {
@@ -277,26 +289,77 @@ class BleService {
     }
   }
 
-  /// Stops scanning and clears the device cache (explicit user action).
+  /// Stops scanning explicitly (user STOP action).
+  /// Freezes the device cache so cards stay at their last known state.
+  /// Does NOT clear the cache — devices remain visible until a new scan
+  /// session is started (which clears the cache in [startScan]).
   Future<void> stopScan() async {
     _scanShouldContinue = false;
     _scanPaused = false;
     _scanSessionDeadline = null;
-    _pruneTimer?.cancel();
-    _pruneTimer = null;
-    _deviceCache.clear();
     await FlutterBluePlus.stopScan();
     await _scanResultsSub?.cancel();
     _scanResultsSub = null;
     if (FlutterBluePlus.isScanningNow) {
       await FlutterBluePlus.stopScan();
     }
+    _freezeCache();
+    if (_snapshot.status == BleConnectionStatus.scanning) {
+      _emit(BleConnectionStatus.disconnected);
+    }
+  }
+
+  // ── Cache freeze / unfreeze ───────────────────────────────────────────────
+
+  /// Snapshots each device's current [staleStatus] into [BleScanDevice.frozenStatus]
+  /// and cancels the prune timer.
+  ///
+  /// After this call, [staleStatus] returns a deterministic, time-independent
+  /// value on every widget rebuild. No device is pruned while frozen.
+  void _freezeCache() {
+    _pruneTimer?.cancel();
+    _pruneTimer = null;
+    if (_deviceCache.isEmpty) return;
+    bool changed = false;
+    for (final id in _deviceCache.keys.toList()) {
+      final d = _deviceCache[id]!;
+      if (d.frozenStatus == null) {
+        // Compute staleStatus NOW (while the value is still meaningful) and
+        // store it so future reads return the same value regardless of time.
+        _deviceCache[id] = d.copyWith(frozenStatus: d.staleStatus);
+        changed = true;
+      }
+    }
+    if (changed) {
+      _scanController.add(List.unmodifiable(_deviceCache.values.toList()));
+    }
+  }
+
+  /// Clears the frozen status from every cached device and refreshes
+  /// [lastSeenAt] to [DateTime.now()] so the fresh scan burst begins with
+  /// all devices treated as active (they will naturally become stale if they
+  /// stop advertising within the new burst cycle).
+  void _unfreezeCache() {
+    if (_deviceCache.isEmpty) return;
+    final now = DateTime.now();
+    for (final id in _deviceCache.keys.toList()) {
+      _deviceCache[id] = _deviceCache[id]!.copyWith(
+        lastSeenAt: now,
+        clearFrozen: true,
+      );
+    }
   }
 
   void _pruneStaleDevices() {
     final now = DateTime.now();
+    // Only prune live (unfrozen) devices. Frozen devices are preserved exactly
+    // as they were when scanning stopped and must not be silently removed.
     final expiredIds = _deviceCache.entries
-        .where((e) => now.difference(e.value.lastSeenAt) > _deviceExpireTimeout)
+        .where(
+          (e) =>
+              e.value.frozenStatus == null &&
+              now.difference(e.value.lastSeenAt) > _deviceExpireTimeout,
+        )
         .map((e) => e.key)
         .toList();
 
@@ -310,9 +373,8 @@ class BleService {
       );
     }
 
-    // Always re-emit when the cache has items so every widget rebuild
-    // re-evaluates device.staleStatus (which calls DateTime.now() internally).
-    // This is what drives the visual stale indicator without a per-card timer.
+    // Re-emit so widgets re-evaluate staleStatus (live devices only — frozen
+    // ones already carry a deterministic value from _freezeCache()).
     if (_deviceCache.isNotEmpty || expiredIds.isNotEmpty) {
       _scanController.add(List.unmodifiable(_deviceCache.values.toList()));
     }

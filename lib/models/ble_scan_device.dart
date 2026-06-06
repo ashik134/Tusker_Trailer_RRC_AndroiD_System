@@ -10,6 +10,7 @@ class BleScanDevice {
     required this.rssi,
     required this.device,
     DateTime? lastSeenAt,
+    this.frozenStatus,
   }) : lastSeenAt = lastSeenAt ?? DateTime.now();
 
   final String id;
@@ -19,17 +20,25 @@ class BleScanDevice {
 
   final DateTime lastSeenAt;
 
+  /// When non-null, [staleStatus] returns this fixed value instead of
+  /// computing from [lastSeenAt]. Set by [BleService._freezeCache] when the
+  /// BLE radio goes idle so device cards never degrade while scan is stopped.
+  final DeviceStaleStatus? frozenStatus;
+
   /// stale detection
   static const Duration staleThreshold = Duration(seconds: 5);
   static const Duration expireThreshold = Duration(seconds: 15);
 
   Duration get silenceDuration => DateTime.now().difference(lastSeenAt);
 
+  /// Returns [frozenStatus] when set (scan is stopped — no live advertisement
+  /// data). Falls back to time-based computation only while scanning is active.
   DeviceStaleStatus get staleStatus {
+    if (frozenStatus != null) return frozenStatus!;
     final age = silenceDuration;
     if (age < staleThreshold) return DeviceStaleStatus.active;
     if (age < expireThreshold) return DeviceStaleStatus.stale;
-    return DeviceStaleStatus.expired; 
+    return DeviceStaleStatus.expired;
   }
 
   bool get isStale => staleStatus != DeviceStaleStatus.active;
@@ -51,14 +60,22 @@ class BleScanDevice {
     );
   }
 
-  /// Returns a copy with optionally updated [rssi] and/or [lastSeenAt].
-  BleScanDevice copyWith({int? rssi, DateTime? lastSeenAt}) {
+  /// Returns a copy with optionally updated fields.
+  /// Pass [clearFrozen] = true to re-enable live stale computation
+  /// (used when a scan session resumes after being paused).
+  BleScanDevice copyWith({
+    int? rssi,
+    DateTime? lastSeenAt,
+    DeviceStaleStatus? frozenStatus,
+    bool clearFrozen = false,
+  }) {
     return BleScanDevice(
       id: id,
       name: name,
       rssi: rssi ?? this.rssi,
       device: device,
       lastSeenAt: lastSeenAt ?? this.lastSeenAt,
+      frozenStatus: clearFrozen ? null : (frozenStatus ?? this.frozenStatus),
     );
   }
 
