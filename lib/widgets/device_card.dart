@@ -115,7 +115,7 @@ class AvailableDeviceCard extends StatelessWidget {
                         onPressed: onConnect,
                         style: OutlinedButton.styleFrom(
                           foregroundColor: ConnectionColors.warning,
-                          side: BorderSide(
+                          side: const BorderSide(
                             color: ConnectionColors.warningBorder,
                           ),
                           shape: RoundedRectangleBorder(
@@ -226,11 +226,7 @@ class _SignalPill extends StatelessWidget {
 
     return Row(
       children: [
-        Icon(
-          Icons.signal_cellular_alt_rounded,
-          size: 12,
-          color: tone,
-        ),
+        Icon(Icons.signal_cellular_alt_rounded, size: 12, color: tone),
         const SizedBox(width: 5),
         Text(
           '$rssi dBm',
@@ -241,7 +237,6 @@ class _SignalPill extends StatelessWidget {
             fontFamily: 'monospace',
           ),
         ),
-       
       ],
     );
   }

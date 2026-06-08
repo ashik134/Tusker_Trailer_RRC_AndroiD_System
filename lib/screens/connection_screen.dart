@@ -903,7 +903,7 @@ class _DevicesPanelState extends State<_DevicesPanel>
           // perceive continuous activity even during the radio pause cycle.
           AnimatedBuilder(
             animation: _scanPulseAnim,
-            builder: (_, __) {
+            builder: (_, _) {
               final scanning = widget.controller.isScanning;
               if (!scanning) return const SizedBox.shrink();
               return SizedBox(
@@ -1100,7 +1100,7 @@ class _EmptyDeviceStateState extends State<_EmptyDeviceState>
                     // Outer pulse ring
                     AnimatedBuilder(
                       animation: _pulseCtrl,
-                      builder: (_, __) => Opacity(
+                      builder: (_, _) => Opacity(
                         opacity: _opacityAnim.value,
                         child: Transform.scale(
                           scale: _scaleAnim.value,
@@ -1185,7 +1185,7 @@ class _ScanSweepPainter extends CustomPainter {
     const sweepWidth = 120.0;
     final center = progress * (size.width + sweepWidth) - sweepWidth / 2;
     final left = center - sweepWidth / 2;
-    final right = center + sweepWidth / 2;
+    // final right = center + sweepWidth / 2;
 
     final rect = Rect.fromLTWH(left, 0, sweepWidth, size.height);
     final paint = Paint()
