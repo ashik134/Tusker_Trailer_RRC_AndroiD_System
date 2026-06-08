@@ -272,9 +272,6 @@ class BleService {
     await _scanResultsSub?.cancel();
     _scanResultsSub = null;
 
-    await _scanResultsSub?.cancel();
-    _scanResultsSub = null;
-
     // Freeze the cache regardless of why the loop exited so devices cannot
     // age between now and the next scan session start.
     _freezeCache();
@@ -469,6 +466,9 @@ class BleService {
   // Discover services and map characteristics.
   Future<void> _discoverServices() async {
     try {
+      // ── Stage: discoveringServices ──────────────────────────────────────
+      _emit(BleConnectionStatus.discoveringServices);
+
       // Negotiate a larger ATT MTU before any characteristic writes.
       // AES-GCM encrypted digital-characteristic payloads (nonce + ciphertext +
       // tag, hex-encoded) reach ~78 bytes — well above the default 20-byte ATT
@@ -544,6 +544,9 @@ class BleService {
       _statusChar = status;
       // _heartbeatChar was assigned inline above (optional — no error if absent).
 
+      // ── Stage: configuringNotifications ────────────────────────────────
+      _emit(BleConnectionStatus.configuringNotifications);
+
       if (!_digitalCharWriteNoResponse) {
         _logger.w(
           'Digital characteristic does not support writeWithoutResponse — '
@@ -574,10 +577,9 @@ class BleService {
       _device!.cancelWhenDisconnected(_authSubscription!, next: true);
       _device!.cancelWhenDisconnected(_statusSubscription!, next: true);
 
-      // _emit(
-      //   BleConnectionStatus.connecting,
-      //   message: 'Synchronizing safe state with PLC...',
-      // );
+      // ── Stage: initializingSafeState ──────────────────────────────────
+      _emit(BleConnectionStatus.initializingSafeState);
+
       await _sendSafeStatePreAuthBestEffort();
       _emit(BleConnectionStatus.awaitingAuthentication);
     } catch (e) {

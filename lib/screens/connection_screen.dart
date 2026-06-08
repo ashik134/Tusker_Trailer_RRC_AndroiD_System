@@ -37,8 +37,19 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
     if (!_didAttemptResumeOnAppear) {
       _didAttemptResumeOnAppear = true;
       // Post-frame so we never call resumeScan() inside a build/layout pass.
+      // Also check for a pending auth-timeout notification — the flag is set
+      // by CraneController when authenticate() times out, and may not have
+      // been consumed yet if ConnectionScreen was not in the widget tree when
+      // the timeout occurred (i.e. LoginScreen was the active screen).
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) controller.resumeScan();
+        if (!mounted) return;
+        controller.resumeScan();
+        if (controller.hasPendingAuthTimeoutNotification) {
+          controller.consumeAuthTimeoutNotification();
+          final authTimeoutError = 'PLC authentication timed out.';
+          _lastShownError = authTimeoutError;
+          _showAuthTimeoutSnackBar();
+        }
       });
     }
   }
@@ -54,25 +65,39 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
 
   void _onControllerChanged() {
     if (!mounted) return;
+
+    // Auth-timeout check is INDEPENDENT of errorMessage — disconnect() clears
+    // _errorMessage before ConnectionScreen becomes active, so the flag must be
+    // detected here regardless of whether there is a current error string.
+    // This fires on the very first notifyListeners() that reaches this listener
+    // (e.g. the disconnected-state emission or the scan-start emission).
+    if (_controller!.hasPendingAuthTimeoutNotification) {
+      _controller!.consumeAuthTimeoutNotification();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showAuthTimeoutSnackBar();
+      });
+      return;
+    }
+
     final error = _controller?.errorMessage;
     if (error != null && error != _lastShownError) {
       _lastShownError = error;
+
+      final errorLower = error.toLowerCase();
+
+      // Distinguish device-unreachable errors (range/power) from generic
+      // connection errors so the operator gets an immediately actionable label.
+      final bool isUnreachable =
+          errorLower.contains('unreachable') ||
+          errorLower.contains('timed out') ||
+          errorLower.contains('timeout') ||
+          errorLower.contains('out of range') ||
+          errorLower.contains('offline');
+      final String snackTitle =
+          isUnreachable ? 'Device Unavailable' : 'Connection Error';
+
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-
-        // Choose a context-aware title: timeout/unreachable errors get a
-        // specific "Device Unavailable" label so the operator understands
-        // immediately that the PLC is out of range, not a software fault.
-        final errorLower = error.toLowerCase();
-        final bool isUnreachable =
-            errorLower.contains('unreachable') ||
-            errorLower.contains('timed out') ||
-            errorLower.contains('timeout') ||
-            errorLower.contains('out of range') ||
-            errorLower.contains('offline');
-        final String snackTitle =
-            isUnreachable ? 'Device Unavailable' : 'Connection Error';
-
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
           ..showSnackBar(
@@ -145,6 +170,74 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
           );
       });
     }
+  }
+
+  void _showAuthTimeoutSnackBar() {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: ConnectionColors.warning,
+          margin: const EdgeInsets.all(16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+          duration: const Duration(seconds: 5),
+          dismissDirection: DismissDirection.horizontal,
+          content: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: Colors.white.withAlpha(51),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.timer_off_rounded,
+                  color: Colors.white,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Authentication Timeout',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Device disconnected due to authentication timeout.',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Color(0xFFFFE0B2),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(width: 8),
+              Icon(
+                Icons.swipe_rounded,
+                color: Colors.white54,
+                size: 16,
+              ),
+            ],
+          ),
+        ),
+      );
   }
 
   @override
@@ -553,17 +646,53 @@ class _StatusBanner extends StatelessWidget {
       );
     }
     if (c.isConnecting) {
-      return _BannerData(
+      return const _BannerData(
         icon: Icons.bluetooth_searching_rounded,
         title: 'Connecting',
         subtitle:
-            'Linking to ${c.connectionState.connectedDevice?.name ?? "device"}...',
+            'Establishing BLE link with device…',
         color: ConnectionColors.scanning,
         bg: ConnectionColors.scanningBg,
         border: ConnectionColors.scanningBorder,
         loading: true,
       );
     }
+    if (c.isDiscoveringServices) {
+      return _BannerData(
+        icon: Icons.settings_ethernet_rounded,
+        title: 'Discovering Services',
+        subtitle:
+            'Reading GATT table from ${c.connectedDeviceName ?? "device"}…',
+        color: ConnectionColors.scanning,
+        bg: ConnectionColors.scanningBg,
+        border: ConnectionColors.scanningBorder,
+        loading: true,
+      );
+    }
+    if (c.isConfiguringNotifications) {
+      return _BannerData(
+        icon: Icons.notifications_active_rounded,
+        title: 'Configuring Notifications',
+        subtitle: 'Initializing communication channels...',
+        color: ConnectionColors.scanning,
+        bg: ConnectionColors.scanningBg,
+        border: ConnectionColors.scanningBorder,
+        loading: true,
+      );
+    }
+    if (c.isInitializingSafeState) {
+      return _BannerData(
+        icon: Icons.shield_rounded,
+        title: 'Initializing Safety State',
+        subtitle: 'Applying safe PLC state...',
+        color: ConnectionColors.scanning,
+        bg: ConnectionColors.scanningBg,
+        border: ConnectionColors.scanningBorder,
+        loading: true,
+      );
+    }
+ 
+    
     if (c.isAwaitingAuthentication || c.isAuthenticating) {
       return _BannerData(
         icon: Icons.lock_outline_rounded,
@@ -945,6 +1074,16 @@ class _DevicesPanelState extends State<_DevicesPanel>
     );
   }
 
+  /// Returns a short label for the current BLE pipeline stage, shown inside
+  /// the inline connecting pill on the target device card.
+  String _pipelineStageLabel(CraneController c) {
+    if (c.isDiscoveringServices) return 'Services…';
+    if (c.isConfiguringNotifications) return 'Channels…';
+    if (c.isInitializingSafeState) return 'Safety…';
+    if (c.isConnected) return 'Ready…';
+    return 'Linking…';
+  }
+
   Widget _buildBody() {
     final c = widget.controller;
 
@@ -998,7 +1137,6 @@ class _DevicesPanelState extends State<_DevicesPanel>
           return AvailableDeviceCard(
             key: ValueKey(d.id),
             device: d,
-            // Disable all other cards while a connection is in progress.
             connecting: true,
             onConnect: () {},
           );

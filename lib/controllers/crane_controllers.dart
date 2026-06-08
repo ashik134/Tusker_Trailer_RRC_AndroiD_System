@@ -69,6 +69,11 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
   bool _cancellingConnection = false;
   BleScanDevice? _cancellingDevice;
 
+  // Set to true when authenticate() resolves with BleAuthOutcome.timedOut so
+  // ConnectionScreen can show a targeted snackbar when it next appears, even
+  // if no further notifyListeners() call is triggered after the screen swap.
+  bool _pendingAuthTimeoutSnack = false;
+
 
   bool get isInitializing => _initializing;
   bool get bluetoothReady => _bluetoothReady;
@@ -111,6 +116,13 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
       _transportConnState.status == BleConnectionStatus.scanning;
   bool get isConnecting =>
       _transportConnState.status == BleConnectionStatus.connecting;
+  bool get isDiscoveringServices =>
+      _transportConnState.status == BleConnectionStatus.discoveringServices;
+  bool get isConfiguringNotifications =>
+      _transportConnState.status ==
+      BleConnectionStatus.configuringNotifications;
+  bool get isInitializingSafeState =>
+      _transportConnState.status == BleConnectionStatus.initializingSafeState;
   bool get isAuthenticating =>
       _transportConnState.status == BleConnectionStatus.authenticating;
   bool get isConnected =>
@@ -130,8 +142,13 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
   /// device list and card never revert to idle state during the handshake.
   bool get isConnectionActive =>
       _transportConnState.status == BleConnectionStatus.connecting ||
+      _transportConnState.status == BleConnectionStatus.discoveringServices ||
+      _transportConnState.status ==
+          BleConnectionStatus.configuringNotifications ||
+      _transportConnState.status == BleConnectionStatus.initializingSafeState ||
       _transportConnState.status == BleConnectionStatus.connected ||
-      _transportConnState.status == BleConnectionStatus.awaitingAuthentication ||
+      _transportConnState.status ==
+          BleConnectionStatus.awaitingAuthentication ||
       _transportConnState.status == BleConnectionStatus.authenticating;
 
   /// The unique permanent identity of this app installation, loaded at startup.
@@ -146,6 +163,18 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
   /// in progress. Guards the UI against flickering back to the idle device
   /// list before the async BLE teardown completes.
   bool get isCancellingConnection => _cancellingConnection;
+
+  /// True when an authentication timeout occurred and ConnectionScreen has not
+  /// yet shown the corresponding snackbar. Consumed (reset to false) by
+  /// [consumeAuthTimeoutNotification] once the snackbar has been displayed.
+  bool get hasPendingAuthTimeoutNotification => _pendingAuthTimeoutSnack;
+
+  /// Acknowledges and clears the pending auth-timeout snackbar notification.
+  void consumeAuthTimeoutNotification() {
+    if (_pendingAuthTimeoutSnack) {
+      _pendingAuthTimeoutSnack = false;
+    }
+  }
 
   /// The device that was being connected when the user tapped Cancel.
   /// Preserved so the ConnectedDeviceCard stays visible and stable during
@@ -451,6 +480,7 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> scanForDevices() async {
     _errorMessage = null;
+    _pendingAuthTimeoutSnack = false;
 
     if (!permissionsGranted) {
       await refreshPermissions();
@@ -828,6 +858,9 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
       _errorMessage = outcome == BleAuthOutcome.timedOut
           ? 'PLC authentication timed out.'
           : 'Credentials were rejected by PLC 14.';
+      if (outcome == BleAuthOutcome.timedOut) {
+        _pendingAuthTimeoutSnack = true;
+      }
       notifyListeners();
       return false;
     } catch (error) {

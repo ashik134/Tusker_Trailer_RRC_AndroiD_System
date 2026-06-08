@@ -7,6 +7,11 @@ enum BleConnectionStatus {
   disconnected,
   scanning,
   connecting,
+  // ── BLE initialization sub-stages (shown in the progress dialog) ──────────
+  discoveringServices,
+  configuringNotifications,
+  initializingSafeState,
+  // ─────────────────────────────────────────────────────────────────────────
   connected,
   awaitingAuthentication,
   authenticating,
