@@ -1074,15 +1074,6 @@ class _DevicesPanelState extends State<_DevicesPanel>
     );
   }
 
-  /// Returns a short label for the current BLE pipeline stage, shown inside
-  /// the inline connecting pill on the target device card.
-  String _pipelineStageLabel(CraneController c) {
-    if (c.isDiscoveringServices) return 'Services…';
-    if (c.isConfiguringNotifications) return 'Channels…';
-    if (c.isInitializingSafeState) return 'Safety…';
-    if (c.isConnected) return 'Ready…';
-    return 'Linking…';
-  }
 
   Widget _buildBody() {
     final c = widget.controller;
