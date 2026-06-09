@@ -103,12 +103,16 @@ class _LoginScreenState extends State<LoginScreen>
                         constraints: const BoxConstraints(maxWidth: 1100),
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF2F7FD).withOpacity(0.86),
+                          color: const Color(
+                            0xFFF2F7FD,
+                          ).withAlpha((0.86 * 255).toInt()),
                           borderRadius: BorderRadius.circular(28),
                           border: Border.all(color: ConnectionColors.border),
                           boxShadow: [
                             BoxShadow(
-                              color: ConnectionColors.primary.withOpacity(0.08),
+                              color: ConnectionColors.primary.withAlpha(
+                                (0.08 * 255).toInt(),
+                              ),
                               blurRadius: 28,
                               offset: const Offset(0, 14),
                             ),
@@ -171,7 +175,7 @@ class _LoginScreenState extends State<LoginScreen>
             height: 280,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: ConnectionColors.scanning.withOpacity(0.08),
+              color: ConnectionColors.scanning.withAlpha((0.08 * 255).toInt()),
             ),
           ),
         ),
@@ -183,7 +187,7 @@ class _LoginScreenState extends State<LoginScreen>
             height: 300,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: ConnectionColors.primary.withOpacity(0.06),
+              color: ConnectionColors.primary.withAlpha((0.06 * 255).toInt()),
             ),
           ),
         ),
@@ -209,8 +213,10 @@ class _LoginScreenState extends State<LoginScreen>
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(999),
-              color: Colors.white.withOpacity(0.16),
-              border: Border.all(color: Colors.white.withOpacity(0.18)),
+              color: Colors.white.withAlpha((0.16 * 255).toInt()),
+              border: Border.all(
+                color: Colors.white.withAlpha((0.18 * 255).toInt()),
+              ),
             ),
             child: const Text(
               'SECURE BLE LINK',
@@ -245,7 +251,7 @@ class _LoginScreenState extends State<LoginScreen>
           Text(
             'Connection is established. Verify credentials before crane commands are enabled.',
             style: TextStyle(
-              color: Colors.white.withOpacity(0.88),
+              color: Colors.white.withAlpha((0.88 * 255).toInt()),
               fontSize: 13,
               height: 1.35,
             ),
@@ -380,8 +386,8 @@ class _LoginScreenState extends State<LoginScreen>
                       child: Text(
                         'Remember credentials on this device',
                         style: TextStyle(
-                          color: ConnectionColors.textSecondary.withOpacity(
-                            0.85,
+                          color: ConnectionColors.textSecondary.withAlpha(
+                            (0.85 * 255).toInt(),
                           ),
                           fontSize: 12.5,
                           fontWeight: FontWeight.w600,
@@ -391,8 +397,8 @@ class _LoginScreenState extends State<LoginScreen>
                     Switch.adaptive(
                       value: controller.rememberCredentials,
                       activeThumbColor: ConnectionColors.scanning,
-                      activeTrackColor: ConnectionColors.scanning.withOpacity(
-                        0.35,
+                      activeTrackColor: ConnectionColors.scanning.withAlpha(
+                        (0.35 * 255).toInt(),
                       ),
                       onChanged: busy
                           ? null
@@ -553,9 +559,9 @@ class _LoginScreenState extends State<LoginScreen>
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: tone.withOpacity(0.08),
+        color: tone.withAlpha((0.08 * 255).toInt()),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: tone.withOpacity(0.22)),
+        border: Border.all(color: tone.withAlpha((0.22 * 255).toInt())),
       ),
       child: Row(
         children: [
@@ -768,8 +774,9 @@ class _LoginScreenState extends State<LoginScreen>
     required CraneController controller,
   }) async {
     if (!mounted) return;
-    if (!controller.isBiometricAvailable || controller.isBiometricEnrolled)
+    if (!controller.isBiometricAvailable || controller.isBiometricEnrolled) {
       return;
+    }
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -907,8 +914,8 @@ class _BeaconPulse extends StatelessWidget {
                   height: 82,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: Colors.white.withOpacity(
-                      waveOpacity.clamp(0.05, 0.42),
+                    color: Colors.white.withAlpha(
+                      (waveOpacity.clamp(0.05, 0.42) * 255).toInt(),
                     ),
                   ),
                 ),
@@ -920,7 +927,9 @@ class _BeaconPulse extends StatelessWidget {
                   height: 82,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white.withOpacity(0.3)),
+                    border: Border.all(
+                      color: Colors.white.withAlpha((0.3 * 255).toInt()),
+                    ),
                   ),
                 ),
               ),
@@ -934,7 +943,7 @@ class _BeaconPulse extends StatelessWidget {
         height: 72,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: Colors.white.withOpacity(0.96),
+          color: Colors.white.withAlpha((0.96 * 255).toInt()),
         ),
         child: const Icon(
           Icons.bluetooth_searching_rounded,

@@ -25,9 +25,10 @@ class BleScanDevice {
   /// BLE radio goes idle so device cards never degrade while scan is stopped.
   final DeviceStaleStatus? frozenStatus;
 
-  /// stale detection
-  static const Duration staleThreshold = Duration(seconds: 5);
-  static const Duration expireThreshold = Duration(seconds: 15);
+  /// stale detection — thresholds apply ONLY while scanning is active.
+  /// Devices frozen by [BleService._freezeCache] bypass these entirely.
+  static const Duration staleThreshold = Duration(seconds: 13);
+  static const Duration expireThreshold = Duration(seconds: 20);
 
   Duration get silenceDuration => DateTime.now().difference(lastSeenAt);
 

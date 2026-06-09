@@ -92,7 +92,8 @@ class BleService {
   Timer? _pruneTimer;
   // Prune timer fires every 3 s so the UI can re-check each device's staleStatus
   // (computed from DateTime.now() at render time) without a per-card timer.
-  static const Duration _deviceExpireTimeout = Duration(seconds: 15);
+  // Must stay in sync with BleScanDevice.expireThreshold.
+  static const Duration _deviceExpireTimeout = Duration(seconds: 20);
   static const Duration _pruneInterval = Duration(seconds: 3);
 
   // ── Scan cycle tuning ───────────────────────────────────────────────────────
@@ -139,7 +140,7 @@ class BleService {
   }
 
   /// Pauses the active scan session — stops the BLE radio burst, cancels the
-  /// prune timer, and freezes every device at its current [staleStatus].
+  /// prune timer, and freezes every device as [DeviceStaleStatus.active].
   ///
   /// The connection status intentionally stays 'scanning' during the pause
   /// so that no UI resets occur while the user is on another screen.
@@ -308,12 +309,24 @@ class BleService {
 
   // ── Cache freeze / unfreeze ───────────────────────────────────────────────
 
-  /// Snapshots each device's current [staleStatus] into [BleScanDevice.frozenStatus]
-  /// and cancels the prune timer.
+  /// Freezes every cached device as [DeviceStaleStatus.active] and cancels
+  /// the prune timer.
   ///
-  /// After this call, [staleStatus] returns a deterministic, time-independent
-  /// value on every widget rebuild. No device is pruned while frozen.
-  void _freezeCache() {
+  /// Devices that are still in the cache when scanning stops were observed
+  /// during this scan session. Genuinely-gone devices have already been
+  /// removed by [_pruneStaleDevices] before this runs, so freezing remaining
+  /// entries as active is always correct and prevents misleading
+  /// "Stale" / "Not advertising" indicators after the radio goes idle.
+  ///
+  /// After this call, [BleScanDevice.staleStatus] returns a deterministic,
+  /// time-independent value on every widget rebuild. No device is pruned
+  /// while frozen.
+  ///
+  /// Pass [forceEmit] = true to broadcast the cache on [_scanController] even
+  /// when every device was already frozen (i.e. no structural change). This is
+  /// needed after [_handleDisconnect] so [CraneController._scanSubscription]
+  /// receives a fresh emission now that the connection guard has been cleared.
+  void _freezeCache({bool forceEmit = false}) {
     _pruneTimer?.cancel();
     _pruneTimer = null;
     if (_deviceCache.isEmpty) return;
@@ -321,13 +334,15 @@ class BleService {
     for (final id in _deviceCache.keys.toList()) {
       final d = _deviceCache[id]!;
       if (d.frozenStatus == null) {
-        // Compute staleStatus NOW (while the value is still meaningful) and
-        // store it so future reads return the same value regardless of time.
-        _deviceCache[id] = d.copyWith(frozenStatus: d.staleStatus);
+        // Always freeze as active — stale/expired states are only meaningful
+        // while the radio is running. Preserving a computed stale status at
+        // freeze time would show misleading warnings on the scan page whenever
+        // the user returns after connecting or backgrounding the app.
+        _deviceCache[id] = d.copyWith(frozenStatus: DeviceStaleStatus.active);
         changed = true;
       }
     }
-    if (changed) {
+    if (changed || forceEmit) {
       _scanController.add(List.unmodifiable(_deviceCache.values.toList()));
     }
   }
@@ -717,6 +732,15 @@ class BleService {
       _statusController.add(PlcOutputCommand.idle());
     }
     _emit(BleConnectionStatus.disconnected);
+    // Re-emit the frozen device cache now that the disconnected state has been
+    // broadcast. CraneController._connStateSubscription processes the
+    // disconnected event synchronously (single-threaded Dart), so by the time
+    // this line executes isConnectionActive and isConnected are both false.
+    // The subsequent scan stream emission therefore bypasses the
+    // "if (isConnectionActive || isConnected) return;" guard and updates
+    // _devices with frozen-as-active cards — preventing stale/expired labels
+    // when the user returns to the ConnectionScreen after a disconnect.
+    _freezeCache(forceEmit: true);
   }
 
   void _handleStatusNotification(List<int> bytes) {

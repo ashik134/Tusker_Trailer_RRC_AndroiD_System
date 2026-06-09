@@ -46,6 +46,7 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
         controller.resumeScan();
         if (controller.hasPendingAuthTimeoutNotification) {
           controller.consumeAuthTimeoutNotification();
+          // ignore: prefer_const_declarations
           final authTimeoutError = 'PLC authentication timed out.';
           _lastShownError = authTimeoutError;
           _showAuthTimeoutSnackBar();
@@ -228,8 +229,8 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                   ],
                 ),
               ),
-              SizedBox(width: 8),
-              Icon(
+              const SizedBox(width: 8),
+              const Icon(
                 Icons.swipe_rounded,
                 color: Colors.white54,
                 size: 16,
@@ -670,7 +671,7 @@ class _StatusBanner extends StatelessWidget {
       );
     }
     if (c.isConfiguringNotifications) {
-      return _BannerData(
+      return const _BannerData(
         icon: Icons.notifications_active_rounded,
         title: 'Configuring Notifications',
         subtitle: 'Initializing communication channels...',
@@ -681,7 +682,7 @@ class _StatusBanner extends StatelessWidget {
       );
     }
     if (c.isInitializingSafeState) {
-      return _BannerData(
+      return const _BannerData(
         icon: Icons.shield_rounded,
         title: 'Initializing Safety State',
         subtitle: 'Applying safe PLC state...',
