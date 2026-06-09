@@ -776,12 +776,15 @@ class BleService {
       await _writeEncryptedCharacteristic(
         characteristic: _digitalChar!,
         plaintext: plainBytes,
-        withoutResponse: false,
+        withoutResponse: _digitalCharWriteNoResponse,
         label: 'safe-state',
       );
       return;
     }
-    await _digitalChar!.write(plainBytes, withoutResponse: false);
+    await _digitalChar!.write(
+      plainBytes,
+      withoutResponse: _digitalCharWriteNoResponse,
+    );
   }
 
   void _handleAuthNotification(List<int> bytes) {
