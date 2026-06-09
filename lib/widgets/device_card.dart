@@ -55,13 +55,13 @@ class AvailableDeviceCard extends StatelessWidget {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
+                shape: BoxShape.circle,
                 color: isStale
                     ? ConnectionColors.warningBg
                     : ConnectionColors.primarySoft,
-                borderRadius: BorderRadius.circular(12),
               ),
               child: Image.asset(
-                'assets/icons/wireless-antenna.png',
+                'assets/icons/Connector.png',
                 color: isStale
                     ? ConnectionColors.warning
                     : ConnectionColors.primary,
@@ -160,7 +160,6 @@ class AvailableDeviceCard extends StatelessWidget {
 // ═══════════════════════════════════════════════════════════
 // Stale Indicator Row — shown below device info when no recent advertisement
 // ═══════════════════════════════════════════════════════════
-
 class _StaleIndicatorRow extends StatelessWidget {
   const _StaleIndicatorRow({required this.isExpired});
 
@@ -168,44 +167,35 @@ class _StaleIndicatorRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(
-          isExpired
-              ? Icons.wifi_off_rounded
-              : Icons.signal_wifi_statusbar_connected_no_internet_4_rounded,
-          size: 11,
-          color: ConnectionColors.warning,
-        ),
-        const SizedBox(width: 4),
-        Text(
-          isExpired ? 'Not advertising' : 'Signal weak',
-          style: const TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w700,
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      decoration: BoxDecoration(
+        color: ConnectionColors.warningBg,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: ConnectionColors.warningBorder),
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.signal_wifi_statusbar_connected_no_internet_4_rounded,
+            size: 10,
             color: ConnectionColors.warning,
-            letterSpacing: 0.2,
           ),
-        ),
-        const SizedBox(width: 1),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-          decoration: BoxDecoration(
-            color: ConnectionColors.warningBg,
-            borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: ConnectionColors.warningBorder),
-          ),
-          child: Text(
-            isExpired ? 'OFFLINE?' : 'STALE',
-            style: const TextStyle(
-              fontSize: 5,
-              fontWeight: FontWeight.w800,
-              color: ConnectionColors.warning,
-              letterSpacing: 0,
+          SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              'STALE',
+              style: TextStyle(
+                fontSize: 8,
+                fontWeight: FontWeight.w800,
+                color: ConnectionColors.warning,
+                letterSpacing: 0.5,
+              ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -272,11 +262,11 @@ class ConnectedDeviceCard extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 48,
-                height: 48,
+                width: 30,
+                height: 30,
                 decoration: BoxDecoration(
+                  shape: BoxShape.circle,
                   color: Colors.white,
-                  borderRadius: BorderRadius.circular(14),
                   boxShadow: [
                     BoxShadow(
                       color: const Color.fromARGB(
@@ -290,10 +280,11 @@ class ConnectedDeviceCard extends StatelessWidget {
                     ),
                   ],
                 ),
-                child: const Icon(
-                  Icons.developer_board_rounded,
-                  color: ConnectionColors.connected,
-                  size: 24,
+                child: Image.asset(
+                  'assets/icons/plc.png',
+                  color: ConnectionColors.primary,
+                  width: 20,
+                  height: 20,
                 ),
               ),
               const SizedBox(width: 14),
@@ -416,7 +407,7 @@ class _RSSIBar extends StatelessWidget {
   double get _signalStrength => ((rssi + 100) / 70).clamp(0.0, 1.0);
 
   Color get _signalColor {
-    if (_signalStrength >= 0.65) return ConnectionColors.connected;
+    if (_signalStrength >= 0.65) return ConnectionColors.textSecondary;
     if (_signalStrength >= 0.35) return ConnectionColors.warning;
     return ConnectionColors.error;
   }
