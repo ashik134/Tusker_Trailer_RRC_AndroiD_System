@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'package:tusker_trailer_rrc/models/app_enums.dart';
 import 'package:tusker_trailer_rrc/utils/constants.dart';
 import 'package:tusker_trailer_rrc/models/ble_scan_device.dart';
 import 'package:tusker_trailer_rrc/widgets/circular_progress_indicator.dart';
@@ -74,19 +75,26 @@ class AvailableDeviceCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    device.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: isStale
-                          ? ConnectionColors.textSecondary
-                          : ConnectionColors.textPrimary,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                    ),
+                  Row(
+                    children: [
+                      Text(
+                        device.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: isStale
+                              ? ConnectionColors.textSecondary
+                              : ConnectionColors.textPrimary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      
+                    ],
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 3),
+                  _PlcTypeBadge(plcType: device.plcType, compact: true),
+                  const SizedBox(height: 3),
                   Text(
                     device.id,
                     maxLines: 1,
@@ -292,17 +300,24 @@ class ConnectedDeviceCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      device.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: ConnectionColors.textPrimary,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.2,
-                      ),
+                    Row(
+                      children: [
+                        Text(
+                          device.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: ConnectionColors.textPrimary,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.2,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        _PlcTypeBadge(plcType: device.plcType, compact: true),
+                      ],
                     ),
+
                     const SizedBox(height: 3),
                     Text(
                       device.id,
@@ -387,6 +402,63 @@ class ConnectedDeviceCard extends StatelessWidget {
                 ),
                 backgroundColor: ConnectionColors.surfaceAlt,
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// PLC Type Badge — shows the PLC hardware model from manufacturer data
+// ═══════════════════════════════════════════════════════════
+
+class _PlcTypeBadge extends StatelessWidget {
+  const _PlcTypeBadge({required this.plcType, this.compact = true});
+
+  final PlcType plcType;
+
+  /// When true, uses tighter padding for the smaller AvailableDeviceCard.
+  final bool compact;
+
+  bool get _isKnown => plcType != PlcType.unknown;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color bg = _isKnown
+        ? ConnectionColors.primary.withAlpha(20)
+        : ConnectionColors.surfaceAlt;
+    final Color border = _isKnown
+        ? ConnectionColors.primary.withAlpha(70)
+        : ConnectionColors.border;
+    final Color textColor = _isKnown
+        ? ConnectionColors.primary
+        : ConnectionColors.textMuted;
+    final double fontSize = compact ? 9.5 : 11.0;
+
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 6 : 8,
+        vertical: compact ? 2 : 3,
+      ),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+         
+         
+          Text(
+            plcType.displayName,
+            style: TextStyle(
+              fontSize: fontSize,
+              fontWeight: FontWeight.w800,
+              color: textColor,
+              letterSpacing: 0.4,
             ),
           ),
         ],

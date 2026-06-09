@@ -1,4 +1,5 @@
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:tusker_trailer_rrc/models/app_enums.dart';
 
 // based on advertisement silence time.
 enum DeviceStaleStatus { active, stale, expired }
@@ -11,12 +12,16 @@ class BleScanDevice {
     required this.device,
     DateTime? lastSeenAt,
     this.frozenStatus,
+    this.plcType = PlcType.unknown,
   }) : lastSeenAt = lastSeenAt ?? DateTime.now();
 
   final String id;
   final String name;
   final int rssi;
   final BluetoothDevice device;
+
+  /// PLC hardware model decoded from BLE advertisement manufacturer data.
+  final PlcType plcType;
 
   final DateTime lastSeenAt;
 
@@ -58,7 +63,41 @@ class BleScanDevice {
       rssi: result.rssi,
       device: result.device,
       lastSeenAt: DateTime.now(),
+      plcType: _parsePlcType(result),
     );
+  }
+
+  /// Extracts the PLC type from BLE advertisement manufacturer data.
+  ///
+  /// The firmware encodes the model as a plain ASCII string
+  /// (e.g. "PLC14") in the Manufacturer Specific Data AD type.
+  /// flutter_blue_plus parses the first two bytes as the little-endian
+  /// company ID and the remainder as the payload. This method reconstructs
+  /// the original byte sequence to recover the full model string.
+  static PlcType _parsePlcType(ScanResult result) {
+    try {
+      final mfrData = result.advertisementData.manufacturerData;
+      for (final entry in mfrData.entries) {
+        final companyId = entry.key;
+        final payload = entry.value;
+        // Reconstruct original bytes: LE uint16 company ID + payload.
+        final bytes = [
+          companyId & 0xFF,
+          (companyId >> 8) & 0xFF,
+          ...payload,
+        ];
+        // Only accept printable ASCII to guard against binary garbage.
+        if (bytes.isEmpty || !bytes.every((b) => b >= 0x20 && b <= 0x7E)) {
+          continue;
+        }
+        final str = String.fromCharCodes(bytes);
+        final type = PlcType.fromString(str);
+        if (type != PlcType.unknown) return type;
+      }
+    } catch (_) {
+      // Malformed manufacturer data — fall through to unknown.
+    }
+    return PlcType.unknown;
   }
 
   /// Returns a copy with optionally updated fields.
@@ -69,6 +108,7 @@ class BleScanDevice {
     DateTime? lastSeenAt,
     DeviceStaleStatus? frozenStatus,
     bool clearFrozen = false,
+    PlcType? plcType,
   }) {
     return BleScanDevice(
       id: id,
@@ -77,6 +117,7 @@ class BleScanDevice {
       device: device,
       lastSeenAt: lastSeenAt ?? this.lastSeenAt,
       frozenStatus: clearFrozen ? null : (frozenStatus ?? this.frozenStatus),
+      plcType: plcType ?? this.plcType,
     );
   }
 

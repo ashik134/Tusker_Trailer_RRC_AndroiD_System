@@ -11,6 +11,7 @@ import 'package:tusker_trailer_rrc/services/biometric_service.dart';
 import 'package:tusker_trailer_rrc/services/secure_credential_store.dart';
 import 'package:tusker_trailer_rrc/services/permission_service.dart';
 import 'package:tusker_trailer_rrc/services/device_identity_service.dart';
+import 'package:tusker_trailer_rrc/utils/constants.dart';
 import 'package:tusker_trailer_rrc/utils/preferences.dart';
 
 class CraneController extends ChangeNotifier with WidgetsBindingObserver {
@@ -196,6 +197,18 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
   // ── Connected device info ─────────────────────────────────────────────────
   String? get connectedDeviceName => _transportConnState.connectedDevice?.name;
   int? get connectedDeviceRssi => _transportConnState.connectedDevice?.rssi;
+  PlcType? get connectedDevicePlcType =>
+      _transportConnState.connectedDevice?.plcType;
+
+  /// Device name with PLC model appended when known (e.g. "RRC_PLC1 • PLC14").
+  String get connectedDeviceTitle {
+    final name = connectedDeviceName ?? BLEConstants.deviceName;
+    final plc = connectedDevicePlcType;
+    if (plc != null && plc != PlcType.unknown) {
+      return '$name \u2022 ${plc.displayName}';
+    }
+    return name;
+  }
 
   // ── Hoist state derived from active command ───────────────────────────────
   HoistState get hoistState {

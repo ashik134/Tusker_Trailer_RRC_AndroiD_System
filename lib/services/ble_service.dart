@@ -755,7 +755,7 @@ class BleService {
     _statusController.add(command);
   }
 
-  Future<void> _sendSafeStatePreAuthBestEffort() async {
+  Future<void> _sendSafeStatePreAuthBestEffort() async { 
     if (_digitalChar == null) {
       return;
     }
@@ -1119,13 +1119,9 @@ class BleService {
       }
       try {
         final rssi = await device.readRssi();
-        // Reconstruct with fresh RSSI (rssi field is final on BleScanDevice).
-        _connectedDevice = BleScanDevice(
-          id: connectedDevice.id,
-          name: connectedDevice.name,
-          rssi: rssi,
-          device: connectedDevice.device,
-        );
+        // Use copyWith so all fields (including plcType) are preserved —
+        // only the RSSI reading changes.
+        _connectedDevice = connectedDevice.copyWith(rssi: rssi);
 
         _emit(_snapshot.status);
       } catch (e) {

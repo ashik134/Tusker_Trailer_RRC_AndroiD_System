@@ -500,8 +500,7 @@ class _ControlScreenState extends State<ControlScreen>
                       children: [
                         // Device name
                         Text(
-                          controller.connectedDeviceName ??
-                              BLEConstants.deviceName,
+                          controller.connectedDeviceTitle,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -550,6 +549,7 @@ class _ControlScreenState extends State<ControlScreen>
                   Tooltip(
                     message:
                         'Device: ${controller.connectedDeviceName}\n'
+                        'Model: ${controller.connectedDevicePlcType?.displayName ?? "Unknown PLC"}\n'
                         'RSSI: ${controller.connectedDeviceRssi ?? "N/A"} dBm\n'
                         'Status: Authenticated',
                     child: Container(
