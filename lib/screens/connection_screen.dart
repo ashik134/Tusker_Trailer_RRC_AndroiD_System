@@ -10,7 +10,6 @@ import 'package:tusker_trailer_rrc/screens/settings_screen.dart';
 
 import 'package:tusker_trailer_rrc/controllers/crane_controllers.dart';
 
-
 class ConnectionScreen extends StatefulWidget {
   const ConnectionScreen({super.key});
 
@@ -21,8 +20,7 @@ class ConnectionScreen extends StatefulWidget {
 class _ConnectionScreenState extends State<ConnectionScreen> {
   CraneController? _controller;
   String? _lastShownError;
-  // Guards the one-time resumeScan() call so it only fires on the first
-  // didChangeDependencies() invocation (i.e. when the screen first appears).
+
   bool _didAttemptResumeOnAppear = false;
 
   @override
@@ -36,11 +34,7 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
     }
     if (!_didAttemptResumeOnAppear) {
       _didAttemptResumeOnAppear = true;
-      // Post-frame so we never call resumeScan() inside a build/layout pass.
-      // Also check for a pending auth-timeout notification — the flag is set
-      // by CraneController when authenticate() times out, and may not have
-      // been consumed yet if ConnectionScreen was not in the widget tree when
-      // the timeout occurred (i.e. LoginScreen was the active screen).
+
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         controller.resumeScan();
@@ -58,8 +52,7 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
   @override
   void dispose() {
     _controller?.removeListener(_onControllerChanged);
-    // Pause (not stop) the scan so the device cache and session deadline are
-    // preserved. resumeScan() will restart the bursts when the screen reappears.
+
     _controller?.pauseScan();
     super.dispose();
   }
@@ -67,11 +60,6 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
   void _onControllerChanged() {
     if (!mounted) return;
 
-    // Auth-timeout check is INDEPENDENT of errorMessage — disconnect() clears
-    // _errorMessage before ConnectionScreen becomes active, so the flag must be
-    // detected here regardless of whether there is a current error string.
-    // This fires on the very first notifyListeners() that reaches this listener
-    // (e.g. the disconnected-state emission or the scan-start emission).
     if (_controller!.hasPendingAuthTimeoutNotification) {
       _controller!.consumeAuthTimeoutNotification();
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -86,16 +74,15 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
 
       final errorLower = error.toLowerCase();
 
-      // Distinguish device-unreachable errors (range/power) from generic
-      // connection errors so the operator gets an immediately actionable label.
       final bool isUnreachable =
           errorLower.contains('unreachable') ||
           errorLower.contains('timed out') ||
           errorLower.contains('timeout') ||
           errorLower.contains('out of range') ||
           errorLower.contains('offline');
-      final String snackTitle =
-          isUnreachable ? 'Device Unavailable' : 'Connection Error';
+      final String snackTitle = isUnreachable
+          ? 'Device Unavailable'
+          : 'Connection Error';
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -230,11 +217,7 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                 ),
               ),
               const SizedBox(width: 8),
-              const Icon(
-                Icons.swipe_rounded,
-                color: Colors.white54,
-                size: 16,
-              ),
+              const Icon(Icons.swipe_rounded, color: Colors.white54, size: 16),
             ],
           ),
         ),
@@ -614,7 +597,9 @@ class _StatusBanner extends StatelessWidget {
             : Icons.error_outline_rounded,
         title: isUnreachable ? 'Device Unavailable' : 'Connection Error',
         subtitle: msg,
-        color: isUnreachable ? ConnectionColors.warning : ConnectionColors.error,
+        color: isUnreachable
+            ? ConnectionColors.warning
+            : ConnectionColors.error,
         bg: isUnreachable
             ? ConnectionColors.warningBg
             : ConnectionColors.errorBg,
@@ -650,8 +635,7 @@ class _StatusBanner extends StatelessWidget {
       return const _BannerData(
         icon: Icons.bluetooth_searching_rounded,
         title: 'Connecting',
-        subtitle:
-            'Establishing BLE link with device…',
+        subtitle: 'Establishing BLE link with device…',
         color: ConnectionColors.scanning,
         bg: ConnectionColors.scanningBg,
         border: ConnectionColors.scanningBorder,
@@ -692,8 +676,7 @@ class _StatusBanner extends StatelessWidget {
         loading: true,
       );
     }
- 
-    
+
     if (c.isAwaitingAuthentication || c.isAuthenticating) {
       return _BannerData(
         icon: Icons.lock_outline_rounded,
@@ -795,7 +778,6 @@ class _MiniStatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Calculate size based on screen width
     final screenWidth = MediaQuery.of(context).size.width;
     final double cardWidth = screenWidth < 600 ? 110 : 140;
     final double cardHeight = screenWidth < 600 ? 65 : 75;
@@ -910,9 +892,10 @@ class _DevicesPanelState extends State<_DevicesPanel>
       vsync: this,
       duration: const Duration(milliseconds: 2000),
     );
-    _scanPulseAnim = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _scanPulseCtrl, curve: Curves.easeInOut),
-    );
+    _scanPulseAnim = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _scanPulseCtrl, curve: Curves.easeInOut));
     if (widget.controller.isScanning) _scanPulseCtrl.repeat();
   }
 
@@ -950,7 +933,11 @@ class _DevicesPanelState extends State<_DevicesPanel>
   @override
   Widget build(BuildContext context) {
     final c = widget.controller;
-    final blocked = c.isScanning || c.isConnectionActive || c.isCancellingConnection || c.isConnected;
+    final blocked =
+        c.isScanning ||
+        c.isConnectionActive ||
+        c.isCancellingConnection ||
+        c.isConnected;
     final count = c.isConnected ? 1 : c.devices.length;
     return Container(
       decoration: BoxDecoration(
@@ -1029,8 +1016,7 @@ class _DevicesPanelState extends State<_DevicesPanel>
             ),
           ),
           const Divider(height: 1, color: ConnectionColors.divider),
-          // Subtle scan-sweep bar — visible only while scanning so users
-          // perceive continuous activity even during the radio pause cycle.
+
           AnimatedBuilder(
             animation: _scanPulseAnim,
             builder: (_, _) {
@@ -1055,7 +1041,7 @@ class _DevicesPanelState extends State<_DevicesPanel>
                       end: Alignment.bottomCenter,
                       colors: [
                         Colors.white.withAlpha(100),
-                        Colors.white.withAlpha(255), // Bottom: fully visible
+                        Colors.white.withAlpha(255), // fully visible
                       ],
                     ).createShader(bounds);
                   },
@@ -1075,13 +1061,9 @@ class _DevicesPanelState extends State<_DevicesPanel>
     );
   }
 
-
   Widget _buildBody() {
     final c = widget.controller;
 
-    // During cancellation, connectedDevice is cleared by the service before
-    // emitting disconnected. Fall back to the cached cancellingDevice so the
-    // ConnectedDeviceCard stays stable throughout the async teardown window.
     final targetDevice =
         c.connectionState.connectedDevice ?? c.cancellingDevice;
 
@@ -1108,7 +1090,7 @@ class _DevicesPanelState extends State<_DevicesPanel>
         );
       }
 
-      // All scanned devices except the target (already shown at top).
+      // All scanned devices except the target
       final others = c.devices.where((d) => d.id != targetDevice.id).toList();
 
       return ListView.separated(
@@ -1136,7 +1118,7 @@ class _DevicesPanelState extends State<_DevicesPanel>
       );
     }
 
-    // ── Idle / scanning state ──────────────────────────────────────────────
+    // ── Idle / scanning state
     if (c.devices.isEmpty) {
       return _EmptyDeviceState(
         key: const ValueKey('empty-idle'),
@@ -1186,12 +1168,14 @@ class _EmptyDeviceStateState extends State<_EmptyDeviceState>
       vsync: this,
       duration: const Duration(milliseconds: 1800),
     );
-    _scaleAnim = Tween<double>(begin: 0.75, end: 1.45).animate(
-      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeOut),
-    );
-    _opacityAnim = Tween<double>(begin: 0.55, end: 0.0).animate(
-      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeOut),
-    );
+    _scaleAnim = Tween<double>(
+      begin: 0.75,
+      end: 1.45,
+    ).animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeOut));
+    _opacityAnim = Tween<double>(
+      begin: 0.55,
+      end: 0.0,
+    ).animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeOut));
     if (widget.scanning) _pulseCtrl.repeat();
   }
 
@@ -1272,7 +1256,9 @@ class _EmptyDeviceStateState extends State<_EmptyDeviceState>
             ] else
               const SizedBox(height: 14),
             Text(
-              widget.scanning ? 'Scanning for Devices...' : 'No Controllers Found',
+              widget.scanning
+                  ? 'Scanning for Devices...'
+                  : 'No Controllers Found',
               textAlign: TextAlign.center,
               style: const TextStyle(
                 color: ConnectionColors.textPrimary,
@@ -1303,8 +1289,6 @@ class _EmptyDeviceStateState extends State<_EmptyDeviceState>
 // Scan sweep bar painter
 // ═══════════════════════════════════════════════════════════
 
-/// Renders a 2-pixel-high gradient sweep that travels left→right on repeat.
-/// Gives a radar-sweep feel that bridges visual gaps between BLE burst cycles.
 class _ScanSweepPainter extends CustomPainter {
   const _ScanSweepPainter({required this.progress});
 

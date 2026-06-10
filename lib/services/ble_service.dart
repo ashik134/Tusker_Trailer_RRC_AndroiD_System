@@ -47,43 +47,26 @@ class BleService {
   Completer<void>? _pendingSafeStateCompleter;
   bool _isDisposing = false;
 
-  // True once the PLC has confirmed AUTH_OK and the session is live.
-  // Digital-characteristic writes are AES-128-GCM encrypted while this is true.
   bool _sessionAuthenticated = false;
 
-  // True if the digital characteristic supports ATT WRITE COMMAND (no ACK needed).
-  // Enables fire-and-forget control writes for minimal latency (~1 connection interval
-  // vs ~2 round-trips with ATT WRITE REQUEST). Set during service discovery.
   bool _digitalCharWriteNoResponse = false;
 
-  // ── Live RSSI polling ───────────────────────────────────────────────────────
   Timer? _rssiTimer;
 
-  // ── Heartbeat loop ──────────────────────────────────────────────────────────
+  // ── Heartbeat loop
   bool _heartbeatActive = false;
   Timer? _heartbeatTimer;
   bool _heartbeatWritePending = false;
 
-  // All AES-GCM encrypted app→PLC writes share one monotonic nonce counter in
-  // the firmware, so they must be encrypted and written in call order.
   Future<void> _encryptedWriteLane = Future<void>.value();
   int _cryptoSessionGeneration = 0;
 
-  // ── Continuous scan control ─────────────────────────────────────────────────
   bool _scanShouldContinue = false;
 
-  // True while the session is intentionally paused (screen navigation or app
-  // background). Deadline and device cache are preserved so the session can
-  // be resumed seamlessly when the user returns to the Scan screen.
   bool _scanPaused = false;
 
-  // Persisted across pause/resume so the 3-minute cap counts real elapsed time
-  // regardless of how many pause/resume cycles occur. Null when no session.
   DateTime? _scanSessionDeadline;
 
-  // Set to true by cancelConnecting() before aborting the in-flight connect()
-  // call. Prevents the connect() catch block from emitting an error state when
-  // the disconnection was intentionally triggered by the user.
   bool _connectCancelled = false;
 
   // ── Device cache — prevents list flicker during scan/pause cycles ──────────────
@@ -206,7 +189,6 @@ class BleService {
 
     _scanResultsSub = FlutterBluePlus.scanResults.listen(
       (results) {
-        final now = DateTime.now();
         bool changed = false;
 
         for (final result in results) {
@@ -221,17 +203,27 @@ class BleService {
             continue;
           }
 
-          final device = BleScanDevice.fromScanResult(result); // lastSeenAt = now
+          // lastSeenAt = result.timeStamp (the actual advertisement time).
+          // Do NOT use DateTime.now() here: FBP emits the full cumulative
+          // device list on every advertisement from any device, so now would
+          // refresh lastSeenAt for devices that stopped advertising, breaking
+          // stale detection.
+          final device = BleScanDevice.fromScanResult(result);
           final existing = _deviceCache[device.id];
 
           if (existing == null) {
             _deviceCache[device.id] = device;
             changed = true;
           } else if (existing.rssi != device.rssi || existing.isStale) {
-            _deviceCache[device.id] = device; 
+            _deviceCache[device.id] = device;
             changed = true;
           } else {
-            _deviceCache[device.id] = existing.copyWith(lastSeenAt: now);
+            // RSSI unchanged and not yet stale: refresh lastSeenAt using the
+            // advertisement's own timestamp (not DateTime.now()) so the clock
+            // advances only when the device actually re-advertises.
+            _deviceCache[device.id] = existing.copyWith(
+              lastSeenAt: device.lastSeenAt,
+            );
           }
         }
 
@@ -254,8 +246,9 @@ class BleService {
       final remaining = _scanSessionDeadline!.difference(DateTime.now());
       if (remaining.inSeconds < 1) break;
 
-      final burst =
-          remaining < _scanBurstDuration ? remaining : _scanBurstDuration;
+      final burst = remaining < _scanBurstDuration
+          ? remaining
+          : _scanBurstDuration;
 
       try {
         await FlutterBluePlus.startScan(
@@ -607,23 +600,11 @@ class BleService {
     }
   }
 
-  /// Cancels an in-progress BLE connection attempt (connecting state only).
-  ///
-  /// Unlike [disconnect], this:
-  /// - Does NOT send a safe-state command (device is not yet authenticated).
-  /// - Does NOT go through the full teardown of auth/status subscriptions
-  ///   (those have not been set up yet during the connecting phase).
-  /// - Emits [BleConnectionStatus.disconnected] immediately, returning the UI
-  ///   to the idle device-list state without error.
   Future<void> cancelConnecting() async {
     if (_snapshot.status != BleConnectionStatus.connecting) return;
 
-    // Set the flag BEFORE any await so the connect() catch block sees it
-    // synchronously when it resumes after device.disconnect() throws.
     _connectCancelled = true;
 
-    // Cancel the connection-state subscription to prevent _handleDisconnect()
-    // from firing as a side effect of calling device.disconnect() below.
     await _connStateSub?.cancel();
     _connStateSub = null;
 
@@ -639,9 +620,7 @@ class BleService {
     if (device != null) {
       try {
         await device.disconnect();
-      } catch (_) {
-        // Best-effort — the connect() rejection is what matters.
-      }
+      } catch (_) {}
     }
 
     _connectCancelled = false;
@@ -649,8 +628,8 @@ class BleService {
   }
 
   Future<void> disconnect({bool emitState = true}) async {
-    _stopRssiPolling(); // Stop polling before tearing down the BLE link.
-    _stopHeartbeat(); // Stop heartbeat before tearing down the BLE link.
+    _stopRssiPolling();
+    _stopHeartbeat();
     _pendingAuthCompleter?.complete(BleAuthOutcome.failed);
     _pendingAuthCompleter = null;
     final pendingSafeState = _pendingSafeStateCompleter;
@@ -670,7 +649,7 @@ class BleService {
       }
     }
     _cryptoSessionGeneration++;
-    _sessionAuthenticated = false; // clear before tearing down characteristics
+    _sessionAuthenticated = false;
     _heartbeatWritePending = false;
     _encryptedWriteLane = Future<void>.value();
     BleCrypto.endSession();
@@ -711,7 +690,10 @@ class BleService {
     _sessionAuthenticated = false;
     _heartbeatWritePending = false;
     _encryptedWriteLane = Future<void>.value();
-    BleCrypto.endSession(); // clear in-memory IV state; persisted counter stays as watermark
+    BleCrypto.endSession();
+    _pendingAuthCompleter?.complete(BleAuthOutcome.timedOut);
+    _pendingAuthCompleter = null;
+
     _device = null;
     _connectedDevice = null;
     _connStateSub?.cancel();
@@ -732,14 +714,7 @@ class BleService {
       _statusController.add(PlcOutputCommand.idle());
     }
     _emit(BleConnectionStatus.disconnected);
-    // Re-emit the frozen device cache now that the disconnected state has been
-    // broadcast. CraneController._connStateSubscription processes the
-    // disconnected event synchronously (single-threaded Dart), so by the time
-    // this line executes isConnectionActive and isConnected are both false.
-    // The subsequent scan stream emission therefore bypasses the
-    // "if (isConnectionActive || isConnected) return;" guard and updates
-    // _devices with frozen-as-active cards — preventing stale/expired labels
-    // when the user returns to the ConnectionScreen after a disconnect.
+
     _freezeCache(forceEmit: true);
   }
 
@@ -755,7 +730,7 @@ class BleService {
     _statusController.add(command);
   }
 
-  Future<void> _sendSafeStatePreAuthBestEffort() async { 
+  Future<void> _sendSafeStatePreAuthBestEffort() async {
     if (_digitalChar == null) {
       return;
     }
@@ -861,9 +836,7 @@ class BleService {
       _pendingAuthCompleter?.complete(BleAuthOutcome.untrusted);
       _pendingAuthCompleter = null;
       _emit(BleConnectionStatus.error, message: payload);
-      // An untrusted device cannot authenticate by definition — close the
-      // session immediately so the BLE link does not remain open and occupy
-      // the PLC's single-operator slot, blocking legitimate reconnection.
+
       unawaited(disconnect(emitState: false));
       return true;
     }
@@ -889,8 +862,6 @@ class BleService {
     return false;
   }
 
-  /// Attempts to decode [bytes] as UTF-8.  Returns [null] on failure rather
-  /// than throwing, so callers can handle malformed payloads safely.
   String? _tryDecodeUtf8(List<int> bytes) {
     try {
       return utf8.decode(bytes);
@@ -904,14 +875,7 @@ class BleService {
   /// This is triggered whenever decryption, tag verification, session
   /// validation, counter validation, or replay detection fails on an inbound
   /// BLE packet.
-  ///
-  /// Because this system controls safety-critical crane/trailer hardware,
-  /// ANY cryptographic failure MUST:
-  ///   1. Stop all active output loops (heartbeat).
-  ///   2. Terminate the encrypted session.
-  ///   3. Fail any pending authentication.
-  ///   4. Emit an error state visible to the UI.
-  ///   5. Disconnect the BLE session and require re-authentication.
+
   Future<void> _enterCryptoSafeState(String reason) async {
     if (_isDisposing) return;
 
@@ -938,16 +902,11 @@ class BleService {
       message: 'Security error — session terminated. Please reconnect.',
     );
 
-    // 5. Disconnect.  disconnect(emitState: false) preserves our error state
-    //    above and attempts a best-effort plaintext safe-state write before
-    //    tearing down the BLE link.
+    // 5. Disconnect.  disconnect(emitState: false)
     await disconnect(emitState: false);
   }
 
   Future<void> _finalizeAuthenticatedSession() async {
-    // The AES-128-GCM session was started in authenticate() before the
-    // encrypted auth write, so the monotonic packet counter is already live.
-    // Only start it here as a fallback if authenticate() was somehow bypassed.
     if (!BleCrypto.sessionActive) {
       await BleCrypto.beginSession();
     }
@@ -962,14 +921,13 @@ class BleService {
         _logger.w('Could not set connection priority: $e');
       }
     }
-    // Mark the session live — AES-GCM encryption is now active for all three
-    // characteristics: auth, digital, and heartbeat.
+
     _sessionAuthenticated = true;
     _emit(BleConnectionStatus.authenticated);
     _pendingAuthCompleter?.complete(BleAuthOutcome.success);
     _pendingAuthCompleter = null;
-    _startRssiPolling(); // Begin live RSSI updates now that the session is fully up.
-    _startHeartbeat(); // Begin 100 ms heartbeat — Timer.periodic, fire-and-forget writes.
+    _startRssiPolling();
+    _startHeartbeat();
   }
 
   Future<BleAuthOutcome> authenticate({
@@ -988,20 +946,12 @@ class BleService {
     _emit(BleConnectionStatus.authenticating);
 
     // Auth payload is AES-128-GCM encrypted (Flutter → PLC).
-    //
-    // The session is started here — before the write — so the nonce counter
-    // is consistent across auth, digital, and heartbeat characteristics.
-    // _finalizeAuthenticatedSession() reuses the active session instead of
-    // restarting it, preserving the monotonic packet counter.
-    //
-    //   Auth char    → AES-128-GCM encrypted (Flutter → PLC)
-    //   Digital char → AES-128-GCM encrypted (Flutter → PLC)
-    //   Heartbeat    → AES-128-GCM encrypted (Flutter → PLC)
+
     _cryptoSessionGeneration++;
     _sessionAuthenticated = false;
     _heartbeatWritePending = false;
     _encryptedWriteLane = Future<void>.value();
-    BleCrypto.endSession(); // Clear any stale state from a previous attempt.
+    BleCrypto.endSession();
     await BleCrypto.beginSession();
 
     final plaintext = utf8.encode('$email|$password|$deviceId');
@@ -1031,7 +981,7 @@ class BleService {
     }
   }
 
-  // ── Heartbeat helpers ─────────────────────────────────────────────────────
+  // ── Heartbeat helpers
 
   void _startHeartbeat() {
     _stopHeartbeat();
@@ -1058,9 +1008,6 @@ class BleService {
     );
   }
 
-  // Hot path — called every 50 ms. Keep this method lean: no allocations,
-  // no logging, no DateTime calls. Any overhead here directly adds to the
-  // Dart event-loop latency visible as sluggish control response.
   void _sendHeartbeatTick(bool useWithoutResponse) {
     if (!_heartbeatActive || _isDisposing) return;
     if (_heartbeatWritePending) return;
@@ -1079,14 +1026,6 @@ class BleService {
     );
   }
 
-  /// Encrypts the heartbeat payload with AES-128-GCM and writes it to [char].
-  ///
-  /// The "HB" payload is encrypted using the active [BleCrypto] session before
-  /// transmission. The packet counter is incremented on every call, so each
-  /// heartbeat nonce is unique within the session.
-  ///
-  /// Re-checks [_heartbeatActive] and [_isDisposing] before and after
-  /// encryption so a write is never attempted after disconnect or dispose.
   Future<void> _encryptAndSendHeartbeat(
     BluetoothCharacteristic char,
     bool useWithoutResponse,
@@ -1107,7 +1046,7 @@ class BleService {
     _heartbeatTimer = null;
   }
 
-  // ── Live RSSI helpers ─────────────────────────────────────────────────────
+  // ── Live RSSI helpers
 
   void _startRssiPolling() {
     _rssiTimer?.cancel();
@@ -1122,8 +1061,7 @@ class BleService {
       }
       try {
         final rssi = await device.readRssi();
-        // Use copyWith so all fields (including plcType) are preserved —
-        // only the RSSI reading changes.
+
         _connectedDevice = connectedDevice.copyWith(rssi: rssi);
 
         _emit(_snapshot.status);
@@ -1138,8 +1076,7 @@ class BleService {
     _rssiTimer = null;
   }
 
-  // ── Write helpers ──────────────────────────────────────────────────────────
-
+  // ── Write helpers
   Future<void> _writeEncryptedCharacteristic({
     required BluetoothCharacteristic characteristic,
     required List<int> plaintext,
@@ -1211,8 +1148,7 @@ class BleService {
     await _authChar!.write(bytes);
   }
 
-  // ── Bluetooth adapter ──────────────────────────────────────────────────────
-
+  // ── Bluetooth adapter
   Future<void> ensureBluetoothReady() async {
     if (!kIsWeb && Platform.isAndroid) {
       final state = await FlutterBluePlus.adapterState.first;

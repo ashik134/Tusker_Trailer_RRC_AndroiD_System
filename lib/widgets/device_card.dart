@@ -2,8 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import 'package:tusker_trailer_rrc/models/app_enums.dart';
 import 'package:tusker_trailer_rrc/utils/constants.dart';
+import 'package:tusker_trailer_rrc/models/app_enums.dart';
 import 'package:tusker_trailer_rrc/models/ble_scan_device.dart';
 import 'package:tusker_trailer_rrc/widgets/circular_progress_indicator.dart';
 
@@ -25,7 +25,7 @@ class AvailableDeviceCard extends StatelessWidget {
     final isStale = staleStatus != DeviceStaleStatus.active;
     final isExpired = staleStatus == DeviceStaleStatus.expired;
 
-    // Dimmer when another device is connecting; slightly dimmer when stale.
+    // Dimmer when another device is connecting
     final double opacity = connecting ? 0.45 : (isExpired ? 0.70 : 1.0);
 
     final Color borderColor = connecting
@@ -76,6 +76,7 @@ class AvailableDeviceCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
                         device.name,
@@ -89,7 +90,7 @@ class AvailableDeviceCard extends StatelessWidget {
                           fontWeight: FontWeight.w800,
                         ),
                       ),
-                      
+                      if (isStale) _StaleIndicatorRow(isExpired: isExpired),
                     ],
                   ),
                   const SizedBox(height: 3),
@@ -106,56 +107,32 @@ class AvailableDeviceCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 6),
-                  if (isStale)
-                    _StaleIndicatorRow(isExpired: isExpired)
-                  else
-                    _SignalPill(rssi: device.rssi, label: device.signalLabel),
+                  _SignalPill(rssi: device.rssi, label: device.signalLabel),
                 ],
               ),
             ),
-            // Hide the connect button while another device is connecting.
-            if (!connecting) ...[
+            // Hide the connect button while another device is connecting or device is stale.
+            if (!connecting && !isStale) ...[
               const SizedBox(width: 8),
               SizedBox(
                 width: 92,
-                child: isStale
-                    ? OutlinedButton(
-                        onPressed: onConnect,
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: ConnectionColors.warning,
-                          side: const BorderSide(
-                            color: ConnectionColors.warningBorder,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          padding: const EdgeInsets.symmetric(vertical: 11),
-                          textStyle: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.5,
-                          ),
-                          backgroundColor: ConnectionColors.warningBg,
-                        ),
-                        child: const Text('CONNECT'),
-                      )
-                    : FilledButton(
-                        onPressed: onConnect,
-                        style: FilledButton.styleFrom(
-                          backgroundColor: ConnectionColors.primary,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          padding: const EdgeInsets.symmetric(vertical: 11),
-                          textStyle: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.6,
-                          ),
-                        ),
-                        child: const Text('CONNECT'),
-                      ),
+                child: FilledButton(
+                  onPressed: onConnect,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: ConnectionColors.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 11),
+                    textStyle: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                  child: const Text('CONNECT'),
+                ),
               ),
             ],
           ],
@@ -166,7 +143,7 @@ class AvailableDeviceCard extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════
-// Stale Indicator Row — shown below device info when no recent advertisement
+// Stale Indicator Row
 // ═══════════════════════════════════════════════════════════
 class _StaleIndicatorRow extends StatelessWidget {
   const _StaleIndicatorRow({required this.isExpired});
@@ -241,7 +218,7 @@ class _SignalPill extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════
-// Connected Device Card — Shows extra details and disconnect action for the active device
+// Connected Device Card
 // ═══════════════════════════════════════════════════════════
 
 class ConnectedDeviceCard extends StatelessWidget {
@@ -333,7 +310,6 @@ class ConnectedDeviceCard extends StatelessWidget {
                 ),
               ),
 
-              // Status / Connecting indicator
               SizedBox(
                 width: 30,
                 height: 30,
@@ -354,8 +330,8 @@ class ConnectedDeviceCard extends StatelessWidget {
                       Color.fromARGB(255, 111, 152, 224),
                     ],
                   ),
-                  // Stop rotating during cancellation to signal the abort
-                  isAnimating: !isCancelling,
+                  // rotating during cancellation to signal the abort
+                  isAnimating: isCancelling,
                 ),
               ),
             ],
@@ -363,12 +339,12 @@ class ConnectedDeviceCard extends StatelessWidget {
 
           const SizedBox(height: 4),
 
-          // ── RSSI Bar
+          ///////////////////////////
           _RSSIBar(rssi: device.rssi),
 
           const SizedBox(height: 4),
 
-          // ── Cancel Button
+          ///////////////////////////
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
@@ -411,15 +387,13 @@ class ConnectedDeviceCard extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════
-// PLC Type Badge — shows the PLC hardware model from manufacturer data
+// PLC Type Badge
 // ═══════════════════════════════════════════════════════════
 
 class _PlcTypeBadge extends StatelessWidget {
   const _PlcTypeBadge({required this.plcType, this.compact = true});
 
   final PlcType plcType;
-
-  /// When true, uses tighter padding for the smaller AvailableDeviceCard.
   final bool compact;
 
   bool get _isKnown => plcType != PlcType.unknown;
@@ -450,8 +424,6 @@ class _PlcTypeBadge extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-         
-         
           Text(
             plcType.displayName,
             style: TextStyle(
@@ -468,7 +440,7 @@ class _PlcTypeBadge extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════
-// RSSI Bar — Clean visual signal indicator
+// RSSI Bar
 // ═══════════════════════════════════════════════════════════
 
 class _RSSIBar extends StatelessWidget {

@@ -1,17 +1,16 @@
 import 'package:tusker_trailer_rrc/models/ble_scan_device.dart';
 
-// ── Connection lifecycle ──────────────────────────────────────────────────────
+// ── Connection
 
-/// Represents every state the BLE stack can be in, from idle to authenticated.
 enum BleConnectionStatus {
   disconnected,
   scanning,
   connecting,
-  // ── BLE initialization sub-stages (shown in the progress dialog) ──────────
+
   discoveringServices,
   configuringNotifications,
   initializingSafeState,
-  // ─────────────────────────────────────────────────────────────────────────
+
   connected,
   awaitingAuthentication,
   authenticating,
@@ -22,7 +21,6 @@ enum BleConnectionStatus {
 /// Outcome of a PLC authentication attempt.
 enum BleAuthOutcome { success, failed, timedOut, untrusted }
 
-/// Immutable snapshot of the current BLE connection state.
 class BleConnectionState {
   const BleConnectionState({
     required this.status,
@@ -32,10 +30,8 @@ class BleConnectionState {
 
   final BleConnectionStatus status;
 
-  /// Human-readable status message; present on error states.
   final String? message;
 
-  /// The device currently connected (or in the process of connecting).
   final BleScanDevice? connectedDevice;
 
   factory BleConnectionState.initial() {

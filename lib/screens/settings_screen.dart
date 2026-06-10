@@ -5,16 +5,6 @@ import 'package:provider/provider.dart';
 import 'package:tusker_trailer_rrc/controllers/crane_controllers.dart';
 import 'package:tusker_trailer_rrc/utils/constants.dart';
 
-/// Industrial-grade device settings and security information screen.
-///
-/// Provides operators and administrators with:
-///   - Permanent device identity (UUID) for PLC trusted-device registration.
-///   - Real-time authorization/trust status.
-///   - Biometric authentication management.
-///   - Key security configuration facts.
-///
-/// The device ID shown here must be manually registered in the PLC web
-/// interface to authorize this mobile device for control access.
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
@@ -53,7 +43,7 @@ class SettingsScreen extends StatelessWidget {
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
             children: [
-              // ── Section: Device Identity ──────────────────────────────────
+              // ── Section: Device Identity
               const _SectionHeader(
                 icon: Icons.fingerprint_rounded,
                 label: 'DEVICE IDENTITY',
@@ -83,7 +73,7 @@ class SettingsScreen extends StatelessWidget {
               _BiometricCard(controller: controller),
               const SizedBox(height: 24),
 
-              // ── Section: Security Information ─────────────────────────────
+              // ── Section: Security Information
               const _SectionHeader(
                 icon: Icons.security_rounded,
                 label: 'SECURITY INFORMATION',
@@ -93,7 +83,7 @@ class SettingsScreen extends StatelessWidget {
               const _SecurityInfoCard(),
               const SizedBox(height: 24),
 
-              // ── Section: Session ──────────────────────────────────────────
+              // ── Section: Session
               if (controller.isAuthenticated) ...[
                 const _SectionHeader(
                   icon: Icons.link_rounded,

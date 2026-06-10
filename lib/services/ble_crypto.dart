@@ -56,9 +56,9 @@ class BleCrypto {
 
   static bool get sessionActive => _sessionId != null;
 
-  // ==========================================================================
+  // --------------------------------------------------------------------------
   // Session Lifecycle
-  // ==========================================================================
+  // --------------------------------------------------------------------------
 
   static Future<void> beginSession() async {
     _packetCounter = 0;
@@ -81,9 +81,9 @@ class BleCrypto {
     _plcSessionId = null;
   }
 
-  // ==========================================================================
+  // --------------------------------------------------------------------------
   // Encryption
-  // ==========================================================================
+  // --------------------------------------------------------------------------
 
   static Future<List<int>> encrypt(List<int> plaintext) async {
     final nonce = _buildNonce();
@@ -127,9 +127,6 @@ class BleCrypto {
       );
     }
 
-    // Auto-detect hex-encoded packets (current PLC firmware sends replies as
-    // uppercase hex ASCII strings). Raw binary packets pass through unchanged.
-    // This bridge remains until PLC firmware is updated to send raw binary.
     final Uint8List raw;
     if (_looksLikeHex(wireBytes)) {
       raw = _hexDecode(wireBytes);
@@ -137,7 +134,7 @@ class BleCrypto {
       raw = Uint8List.fromList(wireBytes);
     }
 
-    // 1. Length check: 12-byte nonce + ≥0-byte ciphertext + 16-byte tag.
+    //  Length check
     if (raw.length < 28) {
       throw const BleCryptoException(
         'Packet too short — minimum 28 bytes (12-byte nonce + 16-byte GCM tag).',
@@ -146,7 +143,7 @@ class BleCrypto {
 
     final nonce = raw.sublist(0, 12);
 
-    // 2. Bind to or verify the PLC's nonce prefix (nonce bytes 0..5).
+    // verify the PLC's nonce prefix
 
     final currentPlcSession = _plcSessionId;
     if (currentPlcSession == null) {
@@ -162,10 +159,10 @@ class BleCrypto {
       }
     }
 
-    // 3. Decode inbound packet counter (nonce bytes 6..11).
+    //  Decode inbound packet counter
     final inboundCount = _decodeUint48(nonce, 6);
 
-    // 4. Replay protection: counter must be strictly increasing.
+    //  Replay protection:
     if (inboundCount <= _inboundCounter) {
       throw BleCryptoException(
         'Replay detected — inbound counter $inboundCount '
@@ -173,12 +170,12 @@ class BleCrypto {
       );
     }
 
-    // 5. Separate ciphertext and GCM authentication tag.
+    // Separate ciphertext and GCM authentication tag.
     final cipherText = raw.sublist(12, raw.length - 16);
     final tagBytes = raw.sublist(raw.length - 16);
     final mac = Mac(tagBytes);
 
-    // 6. AES-GCM decrypt — throws SecretBoxAuthenticationError on tag failure.
+    // AES-GCM decrypt
     final List<int> plaintext;
     try {
       final secretBox = SecretBox(cipherText, nonce: nonce, mac: mac);
@@ -198,8 +195,6 @@ class BleCrypto {
   }
 
   // ── Internal helpers ──
-
-  /// Builds the deterministic 12-byte nonce for the next packet.
 
   static Uint8List _buildNonce() {
     final session = _sessionId;
@@ -232,16 +227,13 @@ class BleCrypto {
     return nonce;
   }
 
-  /// Returns true when [bytes] is a valid even-length sequence of ASCII hex
-  /// characters (0-9, A-F, a-f).  Used to detect PLC replies encoded as hex
-  /// strings rather than raw binary.
   static bool _looksLikeHex(List<int> bytes) {
     if (bytes.isEmpty || bytes.length.isOdd) return false;
     return bytes.every(
       (b) =>
-          (b >= 0x30 && b <= 0x39) || // 0-9
-          (b >= 0x41 && b <= 0x46) || // A-F
-          (b >= 0x61 && b <= 0x66), // a-f
+          (b >= 0x30 && b <= 0x39) ||
+          (b >= 0x41 && b <= 0x46) ||
+          (b >= 0x61 && b <= 0x66),
     );
   }
 

@@ -21,7 +21,7 @@ class EStopSwipeButton extends StatefulWidget {
 class _EStopSwipeButtonState extends State<EStopSwipeButton>
     with SingleTickerProviderStateMixin {
   static const double _thumbSize = 66.0;
-  static const double _buttonHeight = 74.0;
+  static const double _buttonHeight = 78.0;
   static const double _activationThreshold = 1.0;
 
   // ── drag state ──────────────────────────────────────────────────────────────
@@ -118,7 +118,7 @@ class _EStopSwipeButtonState extends State<EStopSwipeButton>
     }
   }
 
-  // ── build ────────────────────────────────────────────────────────────────────
+  // ──────────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -284,7 +284,6 @@ class _EStopSwipeButtonState extends State<EStopSwipeButton>
   }
 }
 
-// Custom painter for the track tick marks that appear to the right of the thumb.
 class _TrackTickPainter extends CustomPainter {
   final double thumbEnd;
   final Color color;

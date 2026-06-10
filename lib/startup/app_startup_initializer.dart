@@ -35,8 +35,6 @@ class AppStartupInitializer {
   Future<void> _safeTask(Future<void> Function() task) async {
     try {
       await task();
-    } catch (_) {
-      // Non-fatal startup tasks should never crash the app launch.
-    }
+    } catch (_) {}
   }
 }

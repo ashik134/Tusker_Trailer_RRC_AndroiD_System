@@ -13,7 +13,6 @@ import 'package:tusker_trailer_rrc/models/plc_output_command.dart';
 import 'package:tusker_trailer_rrc/widgets/estop_swipe_button.dart';
 import 'package:tusker_trailer_rrc/controllers/crane_controllers.dart';
 
-
 class ControlScreen extends StatefulWidget {
   const ControlScreen({super.key});
 
@@ -28,17 +27,12 @@ class _ControlScreenState extends State<ControlScreen>
   bool _wasDisconnected = false;
 
   // ── Hardware-button E-stop debounce ────────────────────────────────────────
-  // Tracks the last time a hardware volume key triggered an E-stop so that
-  // rapid accidental presses within the cooldown window are ignored.
+
   DateTime? _lastHardwareEStopTime;
   static const Duration _hardwareEStopCooldown = Duration(milliseconds: 1500);
 
   // ── Inactivity sleep mode ───────────────────────────────────────────────────
-  // When Emergency Stop is active and no operator interaction is detected
-  // for [_inactivityTimeout], the screen enters a full-screen sleep overlay
-  // that blocks all control input.  The system stays in sleep until the
-  // operator taps the overlay (returning to the E-stop active state).
-  // Motion remains blocked until the operator completes the E-stop reset flow.
+
   bool _sleepMode = false;
   Timer? _inactivityTimer;
   static const Duration _inactivityTimeout = Duration(minutes: 2);
@@ -51,17 +45,11 @@ class _ControlScreenState extends State<ControlScreen>
     // ── Operational lock-down ─────────────────────────────────────────────
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 
-    
     WakelockPlus.enable();
 
     // ── Hardware volume-key E-stop ────────────────────────────────────────
-    // Intercepts physical Volume Up and Volume Down presses while this screen
-    // is active.  Returning true from the handler consumes the event, which
-    // prevents the system volume-change overlay from appearing.
-    // Works only while the app holds the foreground Activity — this is the
-    // correct and expected scope for a hardware safety trigger.
+
     HardwareKeyboard.instance.addHandler(_handleHardwareKey);
-    // ─────────────────────────────────────────────────────────────────────
 
     _pulseController = AnimationController(
       vsync: this,
@@ -82,7 +70,7 @@ class _ControlScreenState extends State<ControlScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     HardwareKeyboard.instance.removeHandler(_handleHardwareKey);
-    // Restore normal system UI and release the wakelock when leaving.
+
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     WakelockPlus.disable();
     _pulseController.dispose();
@@ -101,9 +89,6 @@ class _ControlScreenState extends State<ControlScreen>
         WakelockPlus.enable();
       case AppLifecycleState.paused:
       case AppLifecycleState.detached:
-        // App has fully left the foreground or the engine is being torn down.
-        // Terminate the BLE control session immediately so the PLC returns to
-        // a safe state without waiting for a BLE connection-timeout watchdog.
         _triggerLifecycleSafeDisconnect();
       default:
         break;
@@ -128,12 +113,10 @@ class _ControlScreenState extends State<ControlScreen>
 
     // ── Inactivity timer sync with E-stop state ─────────────────────────
     if (!controller.estopLatched) {
-      // E-stop cleared — cancel countdown and exit sleep immediately.
       _inactivityTimer?.cancel();
       _inactivityTimer = null;
       if (_sleepMode) _exitSleepMode();
     } else if (!_sleepMode && _inactivityTimer == null) {
-      // E-stop just became active and no timer is running yet — start it.
       _resetInactivityTimer();
     }
   }
@@ -142,7 +125,7 @@ class _ControlScreenState extends State<ControlScreen>
   // Deadman Hold-to-Run Handlers
   // ═══════════════════════════════════════════════════════════
 
-  /// UP button pressed — request UP hold via centralized state engine
+  /// UP button pressed
   Future<void> _onUpPressed() async {
     _resetInactivityTimer();
     final controller = _craneController;
@@ -160,7 +143,7 @@ class _ControlScreenState extends State<ControlScreen>
     Vibration.vibrate(duration: 30, amplitude: 128);
   }
 
-  /// UP button released — clear UP hold via centralized state engine
+  /// UP button released
   Future<void> _onUpReleased() async {
     final controller = _craneController;
     if (controller == null) return;
@@ -172,7 +155,7 @@ class _ControlScreenState extends State<ControlScreen>
     );
   }
 
-  /// DOWN button pressed — request DOWN hold via centralized state engine
+  /// DOWN button pressed
   Future<void> _onDownPressed() async {
     _resetInactivityTimer();
     final controller = _craneController;
@@ -190,7 +173,7 @@ class _ControlScreenState extends State<ControlScreen>
     Vibration.vibrate(duration: 30, amplitude: 128);
   }
 
-  /// DOWN button released — clear DOWN hold via centralized state engine
+  /// DOWN button released
   Future<void> _onDownReleased() async {
     final controller = _craneController;
     if (controller == null) return;
@@ -290,7 +273,7 @@ class _ControlScreenState extends State<ControlScreen>
   }
 
   Future<void> _onResetEStopTap() async {
-    _resetInactivityTimer(); // Operator is present — reset the countdown.
+    _resetInactivityTimer();
     final controller = _craneController;
     if (controller == null) return;
     if (controller.currentScreen != AppScreen.control ||
@@ -314,11 +297,6 @@ class _ControlScreenState extends State<ControlScreen>
   // Inactivity Sleep Mode
   // ═══════════════════════════════════════════════════════════
 
-  /// Resets (or starts) the 5-minute inactivity countdown.
-  ///
-  /// No-op when not mounted, already in sleep mode, or E-stop is not active.
-  /// Calling this at the top of every interaction handler ensures the timer
-  /// restarts from zero on any operator touch, regardless of what the touch does.
   void _resetInactivityTimer() {
     if (!mounted || _sleepMode) return;
     final controller = _craneController;
@@ -327,10 +305,6 @@ class _ControlScreenState extends State<ControlScreen>
     _inactivityTimer = Timer(_inactivityTimeout, _enterSleepMode);
   }
 
-  /// Activates sleep mode after [_inactivityTimeout] with no operator input.
-  ///
-  /// Inserts a full-screen [_SleepModeOverlay] via [Overlay] so it covers
-  /// the entire control UI.  E-stop remains latched — all outputs stay OFF.
   void _enterSleepMode() {
     if (!mounted || _sleepMode) return;
     _inactivityTimer?.cancel();
@@ -339,65 +313,43 @@ class _ControlScreenState extends State<ControlScreen>
     setState(() => _sleepMode = true);
   }
 
-  /// Returns from sleep to the E-stop active state.
-  ///
-  /// Removes the overlay and restarts the inactivity countdown.
-  /// Motion remains blocked — the operator must complete the swipe-to-reset
-  /// flow before any crane movement is possible.
   void _exitSleepMode() {
     if (!mounted) return;
     setState(() => _sleepMode = false);
-    _resetInactivityTimer(); // Restart countdown — E-stop is still latched.
+    _resetInactivityTimer();
   }
 
   // ═══════════════════════════════════════════════════════════
   // Hardware-Assisted Safety: Lifecycle & Volume-Key E-Stop
   // ═══════════════════════════════════════════════════════════
 
-  /// Called by the lifecycle observer when the app leaves the foreground.
-  /// Triggers a safe disconnect: latches E-stop, sends emergency packet,
-  /// then tears down the BLE session — all before the process may be killed.
   void _triggerLifecycleSafeDisconnect() {
     final controller = _craneController;
     if (controller == null || !controller.isConnected) return;
     unawaited(controller.triggerSafeDisconnect());
   }
 
-  /// Hardware-keyboard event handler registered on [HardwareKeyboard].
-  ///
-  /// Intercepts Volume Up and Volume Down key-down events while this screen
-  /// is active.  Returns `true` to consume the event, which prevents the
-  /// Android system from processing the volume change.
-  ///
-  /// Android limitation: this works only while the Flutter Activity holds
-  /// focus.  Volume keys pressed when the screen is off or another app is in
-  /// the foreground are NOT delivered here — the lifecycle safe-disconnect
-  /// path above handles those scenarios.
   bool _handleHardwareKey(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
     final key = event.logicalKey;
     if (key == LogicalKeyboardKey.audioVolumeUp ||
         key == LogicalKeyboardKey.audioVolumeDown) {
       _onHardwareEStop();
-      return true; // Consume — suppress system volume-change overlay.
+      return true;
     }
     return false;
   }
 
-  /// Triggers E-stop from a physical hardware button with debounce protection.
-  ///
-  /// A 1.5 s cooldown prevents rapid accidental re-triggers while ensuring
-  /// the first intentional press activates the stop with zero perceptible delay.
   void _onHardwareEStop() {
     if (!mounted) return;
     final controller = _craneController;
     if (controller == null || !controller.isConnected) return;
-    if (controller.estopLatched) return; // Already in emergency state.
+    if (controller.estopLatched) return;
 
     final now = DateTime.now();
     if (_lastHardwareEStopTime != null &&
         now.difference(_lastHardwareEStopTime!) < _hardwareEStopCooldown) {
-      return; // Within cooldown window — ignore.
+      return;
     }
     _lastHardwareEStopTime = now;
 
@@ -416,12 +368,11 @@ class _ControlScreenState extends State<ControlScreen>
     BuildContext context,
     CraneController controller,
   ) async {
-    // Safety: stop all crane motion immediately
+    // stop all crane motion immediately
     await controller.releaseAllDirectionalHolds();
 
     if (!mounted) return;
 
-    // Delegate dialog to a method that takes NO BuildContext from outer scope
     final confirmed = await _showExitConfirmationDialog();
 
     if (!mounted) return;
@@ -430,13 +381,8 @@ class _ControlScreenState extends State<ControlScreen>
       await controller.disconnect();
     }
   }
-        
-  /// Shows exit confirmation dialog.
-  /// This method is safe because it only uses the context
-  /// provided directly to [showDialog].
+
   Future<bool?> _showExitConfirmationDialog() {
-    // Use widget's context directly — only valid when called synchronously
-    // from a mounted widget
     assert(mounted, 'Cannot show dialog when widget is not mounted');
 
     return showDialog<bool>(
@@ -450,16 +396,11 @@ class _ControlScreenState extends State<ControlScreen>
   // Exit Confirmation Dialog (Stateless — no BuildContext stored)
   // ═══════════════════════════════════════════════════════════
 
-  // ═══════════════════════════════════════════════════════════
-  // Build
-  // ═══════════════════════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
     return Consumer<CraneController>(
       builder: (ctx, controller, _) {
         return PopScope(
-          // Block all Android back gestures and system back actions while on
-          // the Control Screen. Navigation away requires explicit confirmation.
           canPop: false,
           onPopInvokedWithResult: (bool didPop, Object? result) {
             if (didPop) return;
@@ -468,31 +409,33 @@ class _ControlScreenState extends State<ControlScreen>
           child: Scaffold(
             backgroundColor: ConnectionColors.background,
             resizeToAvoidBottomInset: false,
-            // For compact screens, use this layout:
+
             appBar: AppBar(
               backgroundColor: ConnectionColors.surface,
               elevation: 0,
               automaticallyImplyLeading: false,
               titleSpacing: 0,
 
-              // ── Leading: Device Icon ──────────────────────────
               leading: Container(
-                margin: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
+                margin: const EdgeInsets.only(left: 12, right: 8),
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+
                   color: ConnectionColors.primarySoft,
-                  borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(
-                  Icons.developer_board_rounded,
-                  color: ConnectionColors.primary,
-                  size: 22,
+                child: RotatedBox(
+                  quarterTurns: 1,
+                  child: Image.asset(
+                    'assets/icons/plug.png',
+                    color: ConnectionColors.primary,
+                    width: 20,
+                    height: 20,
+                  ),
                 ),
               ),
 
-              // ── Title: Device Info ────────────────────────────
               title: Row(
                 children: [
-                  // Device name & status
                   Expanded(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -504,14 +447,14 @@ class _ControlScreenState extends State<ControlScreen>
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            color: ConnectionColors.textPrimary,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                            color: Color.fromARGB(255, 23, 41, 68),
                             letterSpacing: -0.2,
                           ),
                         ),
                         const SizedBox(height: 2),
-                        // Status row with animated dot
+
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -531,7 +474,7 @@ class _ControlScreenState extends State<ControlScreen>
                             ),
                             if (controller.isConnected) ...[
                               const SizedBox(width: 8),
-                              // RSSI badge (if available)
+
                               _RSSIBadge(rssi: controller.connectedDeviceRssi),
                             ],
                           ],
@@ -542,9 +485,7 @@ class _ControlScreenState extends State<ControlScreen>
                 ],
               ),
 
-              // ── Actions ───────────────────────────────────────
               actions: [
-                // Connection info tooltip
                 if (controller.isConnected)
                   Tooltip(
                     message:
@@ -566,22 +507,19 @@ class _ControlScreenState extends State<ControlScreen>
                       ),
                     ),
                   ),
+                const SizedBox(width: 10),
 
-                // Sign out button
-                TextButton.icon(
+                OutlinedButton.icon(
                   onPressed: () async {
-                    // Step 1: Release all holds (safe, no context used after)
                     await controller.releaseAllDirectionalHolds();
 
-                    // Step 2: Guard — check if still mounted before using context
                     if (!context.mounted) return;
 
-                    // Step 3: _onBackAttempted shows confirmation dialog and
                     await _onBackAttempted(context, controller);
                   },
                   icon: const Icon(
                     Icons.logout_rounded,
-                    size: 16,
+                    size: 14,
                     color: ConnectionColors.textSecondary,
                   ),
                   label: const Text(
@@ -593,7 +531,8 @@ class _ControlScreenState extends State<ControlScreen>
                       letterSpacing: 0.8,
                     ),
                   ),
-                  style: TextButton.styleFrom(
+                  style: OutlinedButton.styleFrom(
+                    backgroundColor: ConnectionColors.primarySoft,
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10),
@@ -621,8 +560,6 @@ class _ControlScreenState extends State<ControlScreen>
                   final sectionSpacing = isCompactHeight ? 8.0 : 12.0;
                   final isCompact = isCompactWidth || isCompactHeight;
 
-                  // Build the main control UI as a named variable so we
-                  // can overlay the sleep screen on top without re-indenting.
                   final body = Padding(
                     padding: EdgeInsets.fromLTRB(
                       outerPadding,
@@ -677,9 +614,6 @@ class _ControlScreenState extends State<ControlScreen>
                     ),
                   );
 
-                  // Overlay the sleep screen on top when active.
-                  // Using a Stack in the build tree (not OverlayEntry) so that
-                  // setState() drives visibility directly — no Overlay API needed.
                   if (!_sleepMode) return body;
                   return Stack(
                     fit: StackFit.expand,
@@ -691,8 +625,8 @@ class _ControlScreenState extends State<ControlScreen>
                 },
               ),
             ),
-          ), // end Scaffold
-        ); // end PopScope
+          ),
+        );
       },
     );
   }
@@ -1075,7 +1009,7 @@ class _ControlScreenState extends State<ControlScreen>
       onTap: _onEStopTap,
       child: Container(
         width: double.infinity,
-        constraints: BoxConstraints(minHeight: compact ? 100: 100),
+        constraints: BoxConstraints(minHeight: compact ? 100 : 100),
         decoration: BoxDecoration(
           gradient: const LinearGradient(
             colors: [Color(0xFF6B0000), AppColors.eStopColor],
@@ -1202,16 +1136,13 @@ class _ControlScreenState extends State<ControlScreen>
             ],
           ),
         ),
-        SizedBox(height: compact ? 6 : 8),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          child: EStopSwipeButton(
-            onActivated: () {
-              _onResetEStopTap();
-            },
-            instructionTitle: 'SWIPE TO RESET E-STOP',
-            instructionSubtitle: 'Slide right to clear emergency lockout',
-          ),
+        SizedBox(height: compact ? 2 : 6),
+        EStopSwipeButton(
+          onActivated: () {
+            _onResetEStopTap();
+          },
+          instructionTitle: 'SWIPE TO RESET E-STOP',
+          instructionSubtitle: 'Slide right to clear emergency lockout',
         ),
       ],
     );
@@ -1220,10 +1151,6 @@ class _ControlScreenState extends State<ControlScreen>
 
 // ═══════════════════════════════════════════════════════════
 // Deadman Hold-to-Run Button
-// ═══════════════════════════════════════════════════════════
-
-// ═══════════════════════════════════════════════════════════
-// Deadman Hold-to-Run Button (FIXED)
 // ═══════════════════════════════════════════════════════════
 
 class _DeadmanButton extends StatefulWidget {
@@ -1235,7 +1162,7 @@ class _DeadmanButton extends StatefulWidget {
   final bool isDisabled;
   final Future<void> Function() onPressed;
   final Future<void> Function() onReleased;
-  final bool isCompact; // NEW
+  final bool isCompact;
 
   const _DeadmanButton({
     required this.label,
@@ -1246,7 +1173,7 @@ class _DeadmanButton extends StatefulWidget {
     required this.isDisabled,
     required this.onPressed,
     required this.onReleased,
-    this.isCompact = false, // NEW
+    this.isCompact = false,
   });
 
   @override
@@ -1485,9 +1412,6 @@ class _DeadmanButtonState extends State<_DeadmanButton>
 
 // ═══════════════════════════════════════════════════════════
 // Deadman Control Button — Hold-to-Run Operator Presence
-//
-// Hold to enable motion. Release to immediately kill all motion.
-// No lock mode — continuous operator presence required at all times.
 // ═══════════════════════════════════════════════════════════
 
 class _DeadmanControlButton extends StatefulWidget {
@@ -1509,7 +1433,7 @@ class _DeadmanControlButton extends StatefulWidget {
 
 class _DeadmanControlButtonState extends State<_DeadmanControlButton>
     with TickerProviderStateMixin {
-  static const Color _heldColor = Color(0xFFD97706); // amber-600
+  static const Color _heldColor = Color(0xFFD97706);
 
   late final AnimationController _glowAnim;
   bool _pointerDown = false;
@@ -1532,11 +1456,9 @@ class _DeadmanControlButtonState extends State<_DeadmanControlButton>
   @override
   void didUpdateWidget(_DeadmanControlButton oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // When E-stop activates mid-press, abort the interaction cleanly.
+
     if (widget.isEstopActive && !oldWidget.isEstopActive && _pointerDown) {
       _pointerDown = false;
-      // onHeld(false) is intentionally skipped — triggerEStop() already cleared
-      // deadman state in the controller; calling it would be a no-op anyway.
     }
   }
 
@@ -1609,7 +1531,6 @@ class _DeadmanControlButtonState extends State<_DeadmanControlButton>
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Icon circle
                 AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
                   width: compact ? 28 : 32,
@@ -1660,7 +1581,7 @@ class _DeadmanControlButtonState extends State<_DeadmanControlButton>
                   ),
                 ),
                 SizedBox(height: compact ? 2 : 3),
-                // State label
+
                 AnimatedDefaultTextStyle(
                   duration: const Duration(milliseconds: 200),
                   style: TextStyle(
@@ -1811,15 +1732,10 @@ class _RSSIBadge extends StatelessWidget {
 
 // ═══════════════════════════════════════════════════════════
 // Sleep Mode Overlay — Industrial Inactivity Screen
-//
-// Shown after [_inactivityTimeout] of no interaction while E-stop is active.
-// Covers the entire control UI and blocks all input.
-// Tap anywhere to return to the E-stop active state.
-// Motion remains locked until the operator completes the swipe-to-reset flow.
 // ═══════════════════════════════════════════════════════════
 
 class _SleepModeOverlay extends StatefulWidget {
-  const _SleepModeOverlay({ required this.onWake});
+  const _SleepModeOverlay({required this.onWake});
 
   final VoidCallback onWake;
 
@@ -1849,18 +1765,17 @@ class _SleepModeOverlayState extends State<_SleepModeOverlay>
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      behavior: HitTestBehavior.opaque, // Consume all touches — block control UI.
+      behavior: HitTestBehavior.opaque, // block control UI.
       onTap: widget.onWake,
       child: Material(
         color: Colors.transparent,
         child: Container(
-          color: const Color(0xEE000000), // ~93 % opaque dark background.
+          color: const Color(0xEE000000), //  dark background.
           child: Center(
             child: AnimatedBuilder(
               animation: _pulseAnim,
               builder: (context, _) {
-                final pulse =
-                    Curves.easeInOut.transform(_pulseAnim.value);
+                final pulse = Curves.easeInOut.transform(_pulseAnim.value);
                 return Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -1951,6 +1866,7 @@ class _ExitConfirmationDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
+      backgroundColor: ConnectionColors.background,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: const Row(
         children: [
@@ -1962,7 +1878,11 @@ class _ExitConfirmationDialog extends StatelessWidget {
           SizedBox(width: 8),
           Text(
             'Exit Control Screen?',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: ConnectionColors.textPrimary,
+            ),
           ),
         ],
       ),

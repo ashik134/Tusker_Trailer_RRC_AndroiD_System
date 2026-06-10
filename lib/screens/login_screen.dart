@@ -295,18 +295,18 @@ class _LoginScreenState extends State<LoginScreen>
                     ),
                   ),
           ),
-          if (!authSessionReady && errorState == null) ...[
-            const SizedBox(height: 12),
-            _AuthErrorCard(
-              state: const _AuthErrorState(
-                title: 'Connection ended',
-                message:
-                    'The authentication link is no longer active. Return to scan and reconnect to PLC14.',
-                icon: Icons.bluetooth_disabled_rounded,
-              ),
-              onBackToScan: controller.disconnect,
-            ),
-          ],
+          // if (!authSessionReady && errorState == null) ...[
+          //   const SizedBox(height: 12),
+          //   _AuthErrorCard(
+          //     state: const _AuthErrorState(
+          //       title: 'Connection ended',
+          //       message:
+          //           'The authentication link is no longer active. Return to scan and reconnect to PLC14.',
+          //       icon: Icons.bluetooth_disabled_rounded,
+          //     ),
+          //     onBackToScan: controller.disconnect,
+          //   ),
+          // ],
           const SizedBox(height: 16),
           Form(
             key: _formKey,
@@ -673,7 +673,7 @@ class _LoginScreenState extends State<LoginScreen>
       return const _AuthErrorState(
         title: 'Authentication timeout',
         message:
-            'PLC14 did not respond in time. Stay close to the device and retry.',
+            'The PLC did not respond in time. Stay close to the device and retry.',
         icon: Icons.timer_off_rounded,
       );
     }

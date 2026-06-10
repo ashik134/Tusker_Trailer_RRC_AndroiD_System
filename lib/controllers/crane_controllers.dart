@@ -27,12 +27,10 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
   BleConnectionState _transportConnState = BleConnectionState.initial();
   BleConnectionStatus _lastConnectionStatus = BleConnectionStatus.disconnected;
   List<BleScanDevice> _devices = const [];
-  
+
   PlcOutputCommand _activeCommand = PlcOutputCommand.idle();
 
-  // ── BLE write serializer ──────────────────────────────────────────────────
-  // Prevents BLE queue flooding when commands arrive faster than writes complete.
-  // Only one write is in flight at a time; the latest pending command wins.
+  // BLE write serializer
   bool _commandInFlight = false;
   List<int>? _pendingCommandBytes;
 
@@ -47,34 +45,24 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
   bool _startupEmergencyArmedForConnection = false;
   bool _biometricAvailable = false;
   bool _biometricEnrolled = false;
-  // When true, currentScreen returns AppScreen.authentication even though
-  // the BLE session has already authenticated. This holds the LoginScreen
-  // in view until the biometric-enrollment offer dialog has been resolved.
+
   bool _pendingEnrollmentOffer = false;
   String? _sessionEmail;
   String? _errorMessage;
   String _savedEmail = '';
   String _savedPassword = '';
   String _deviceId = '';
-  // True when the last auth attempt was rejected because this device is not
-  // in the PLC trusted-device registry. Used to show a targeted UI message.
+
   bool _deviceTrustRejected = false;
   final Set<HoistDirection> _activeDirectionalHolds = <HoistDirection>{};
   HoistDirection? _verticalDirectionLock;
   HoistDirection? _horizontalDirectionLock;
   bool _deadmanHeld = false;
 
-  // Tracks a user-initiated cancellation of an in-progress connect attempt.
-  // Separate from BLE transport state so the UI can show "Cancelling..."
-  // during the async teardown window without flickering back to idle first.
   bool _cancellingConnection = false;
   BleScanDevice? _cancellingDevice;
 
-  // Set to true when authenticate() resolves with BleAuthOutcome.timedOut so
-  // ConnectionScreen can show a targeted snackbar when it next appears, even
-  // if no further notifyListeners() call is triggered after the screen swap.
   bool _pendingAuthTimeoutSnack = false;
-
 
   bool get isInitializing => _initializing;
   bool get bluetoothReady => _bluetoothReady;
@@ -90,10 +78,7 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
   bool get rememberCredentials => _rememberCredentials;
   bool get isBiometricAvailable => _biometricAvailable;
   bool get isBiometricEnrolled => _biometricEnrolled;
-  /// True while the biometric-enrollment offer dialog is pending in the
-  /// authentication screen. Causes [currentScreen] to stay on
-  /// [AppScreen.authentication] until [completePendingEnrollmentOffer] is
-  /// called.
+
   bool get hasPendingEnrollmentOffer => _pendingEnrollmentOffer;
   PlcOutputCommand get activeCommand => _activeCommand;
   bool get estopLatched => _estopLatched;
@@ -109,7 +94,7 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
   String? get sessionEmail => _sessionEmail;
   String? get errorMessage => _errorMessage ?? _transportConnState.message;
   List<BleScanDevice> get devices => _devices;
- 
+
   String get savedEmail => _savedEmail;
   String get savedPassword => _savedPassword;
   BleConnectionState get connectionState => _transportConnState;
@@ -136,11 +121,6 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
   bool get isAwaitingAuthentication =>
       _transportConnState.status == BleConnectionStatus.awaitingAuthentication;
 
-  /// True during any connection phase before navigation completes:
-  /// transport connecting, transport connected (handshake pending),
-  /// awaiting authentication, or mid-authentication.
-  /// Use this — not [isConnecting] — to gate UI and scan updates so the
-  /// device list and card never revert to idle state during the handshake.
   bool get isConnectionActive =>
       _transportConnState.status == BleConnectionStatus.connecting ||
       _transportConnState.status == BleConnectionStatus.discoveringServices ||
@@ -152,40 +132,24 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
           BleConnectionStatus.awaitingAuthentication ||
       _transportConnState.status == BleConnectionStatus.authenticating;
 
-  /// The unique permanent identity of this app installation, loaded at startup.
-  /// Included in every authentication payload for PLC trusted-device validation.
   String get deviceId => _deviceId;
 
-  /// True when the last authentication attempt was rejected because this
-  /// device is not registered in the PLC trusted-device list.
   bool get isDeviceTrustRejected => _deviceTrustRejected;
 
-  /// True while a user-initiated cancellation of a connecting attempt is
-  /// in progress. Guards the UI against flickering back to the idle device
-  /// list before the async BLE teardown completes.
   bool get isCancellingConnection => _cancellingConnection;
 
-  /// True when an authentication timeout occurred and ConnectionScreen has not
-  /// yet shown the corresponding snackbar. Consumed (reset to false) by
-  /// [consumeAuthTimeoutNotification] once the snackbar has been displayed.
   bool get hasPendingAuthTimeoutNotification => _pendingAuthTimeoutSnack;
 
-  /// Acknowledges and clears the pending auth-timeout snackbar notification.
   void consumeAuthTimeoutNotification() {
     if (_pendingAuthTimeoutSnack) {
       _pendingAuthTimeoutSnack = false;
     }
   }
 
-  /// The device that was being connected when the user tapped Cancel.
-  /// Preserved so the ConnectedDeviceCard stays visible and stable during
-  /// the brief async teardown window after [connectionState.connectedDevice]
-  /// is cleared by the BLE service.
   BleScanDevice? get cancellingDevice => _cancellingDevice;
 
+  //  LED indicator states
 
-  // ── LED indicator states ─────────────────────────────────────────────────
-  // Emergency indicator must represent the active lockout condition only.
   bool get ledEstop => _estopLatched;
   bool get ledUp => _activeCommand.up && !_activeCommand.estop;
   bool get ledDown => _activeCommand.down && !_activeCommand.estop;
@@ -194,13 +158,12 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
   bool get ledFast =>
       _activeCommand.speed == HoistSpeed.fast && !_activeCommand.estop;
 
-  // ── Connected device info ─────────────────────────────────────────────────
   String? get connectedDeviceName => _transportConnState.connectedDevice?.name;
   int? get connectedDeviceRssi => _transportConnState.connectedDevice?.rssi;
   PlcType? get connectedDevicePlcType =>
       _transportConnState.connectedDevice?.plcType;
 
-  /// Device name with PLC model appended when known (e.g. "RRC_PLC1 • PLC14").
+  /// "RRC_PLC1 • PLC14"
   String get connectedDeviceTitle {
     final name = connectedDeviceName ?? BLEConstants.deviceName;
     final plc = connectedDevicePlcType;
@@ -231,12 +194,9 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
   String get statusLabel => _activeCommand.statusLabel;
 
   AppScreen get currentScreen => switch (_transportConnState.status) {
-    // When the enrollment-offer dialog is pending we stay on the
-    // authentication screen so the dialog never bleeds into ControlScreen.
     BleConnectionStatus.authenticated =>
       _pendingEnrollmentOffer ? AppScreen.authentication : AppScreen.control,
-    // Transport connected: immediately hand off to auth screen so the user
-    // never sees the connection screen flicker back to idle before navigation.
+
     BleConnectionStatus.connected ||
     BleConnectionStatus.awaitingAuthentication ||
     BleConnectionStatus.authenticating => AppScreen.authentication,
@@ -331,7 +291,7 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  // Initialization and Cleanup //////////////////////////////////////////////////////////////////////////////
+  // Initialization and Cleanup
   Future<void> initialize() {
     if (_initializeFuture != null) {
       return _initializeFuture!;
@@ -347,7 +307,7 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
     _attachStreamsIfNeeded();
 
     try {
-      // Load device identity and saved credentials concurrently.
+      // Load device identity and saved credentials
       final results = await Future.wait<dynamic>([
         DeviceIdentityService.getOrCreate(),
         _preferences.getEmail(),
@@ -390,13 +350,12 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
         _deadmanHeld = false;
         _startupEmergencyArmedForConnection = false;
         _sessionEmail = null;
-        _pendingEnrollmentOffer = false; // Clean up any stale offer state.
+        _pendingEnrollmentOffer = false;
         _deviceTrustRejected = false;
       } else if (snapshot.status == BleConnectionStatus.authenticated &&
           previousStatus != BleConnectionStatus.authenticated) {
         unawaited(ensureControlEntryEmergencyLock());
-        // If biometrics are available but not yet enrolled, gate the screen
-        // transition so the UI can present the enrollment dialog first.
+
         if (_biometricAvailable && !_biometricEnrolled) {
           _pendingEnrollmentOffer = true;
         }
@@ -405,11 +364,6 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
     });
 
     _scanSubscription = _bleService.scanStream.listen((devices) {
-      // Don't clobber the device list while a connection is active — the UI
-      // shows the cached list alongside the connecting card so it must stay
-      // populated until the user explicitly disconnects.
-      // isConnectionActive covers connecting, awaitingAuthentication, and
-      // authenticating so the guard holds across the entire handshake.
       if (isConnectionActive || isConnected) return;
       _devices = devices;
       notifyListeners();
@@ -459,18 +413,10 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
-  //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  /// Device Scanning and Connection //////////////////////////////////////////////////////////////////////////////////
-  /// Pauses the active scan session without clearing the device cache.
-  /// Called by [ConnectionScreen] when it is removed from the widget tree
-  /// (navigation away) so the BLE radio is not left scanning on a dead screen.
   Future<void> pauseScan() async {
     await _bleService.pauseScan();
   }
 
-  /// Resumes a previously paused scan session.
-  /// Called by [ConnectionScreen] when it first appears in the widget tree.
-  /// No-op if no session is active or if the session expired while paused.
   Future<void> resumeScan() async {
     if (!bluetoothReady || !permissionsGranted) return;
     await _bleService.resumeScan();
@@ -481,10 +427,8 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached ||
         state == AppLifecycleState.hidden) {
-      // App moved to background — stop the radio burst to save battery.
       _bleService.pauseScan();
     } else if (state == AppLifecycleState.resumed) {
-      // App returned to foreground — resume only if user is on the scan screen.
       if (currentScreen == AppScreen.connection) {
         resumeScan();
       }
@@ -553,24 +497,17 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  /// Cancels an in-progress connection attempt (connecting state only).
-  /// Does NOT perform the full disconnect teardown — no safe-state write,
-  /// no auth/status subscription cleanup (those do not exist yet during
-  /// the connecting phase). Returns the app cleanly to the idle scan state.
-  ///
-  /// Idempotent — repeated calls while cancellation is in progress are ignored.
   Future<void> cancelConnecting() async {
-    if (_cancellingConnection) return; // prevent duplicate/rapid-tap calls
+    if (_cancellingConnection) return;
     _errorMessage = null;
-    // Snapshot before the service clears connectedDevice so the UI card
-    // stays stable throughout the async teardown window.
+
     _cancellingDevice = _transportConnState.connectedDevice;
     _cancellingConnection = true;
-    notifyListeners(); // → UI immediately shows "Cancelling..." state
+    notifyListeners();
     await _bleService.cancelConnecting();
     _cancellingConnection = false;
     _cancellingDevice = null;
-    notifyListeners(); // → clean state; UI returns to device list
+    notifyListeners();
   }
 
   void setRememberCredentials(bool value) {
@@ -581,13 +518,10 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> disconnect() async {
     _errorMessage = null;
 
-    // Best-effort safe stop before disconnecting transport.
     if (isConnected && !_estopLatched) {
       try {
         await _sendCommand(PlcOutputCommand.idle());
-      } catch (_) {
-        // Ignore: transport teardown below remains the final safety path.
-      }
+      } catch (_) {}
     }
 
     await _bleService.disconnect();
@@ -597,17 +531,15 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> stopScan() async {
     _errorMessage = null;
     await _bleService.stopScan();
-    // State transitions via _connStateSubscription when startScan() resolves.
   }
 
-  // ── Command helpers ───────────────────────────────────────────────────────
+  // Command helpers
 
   Future<void> _sendCommand(PlcOutputCommand command) async {
     _activeCommand = command;
     notifyListeners();
     final bytes = command.wireBytes.toList();
     if (_commandInFlight) {
-      // Replace whatever was pending — latest command wins.
       _pendingCommandBytes = bytes;
       return;
     }
@@ -618,7 +550,7 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
     _commandInFlight = true;
     try {
       await _bleService.writeDigital(bytes);
-      // Drain at most one pending command queued while this write was in flight.
+
       final next = _pendingCommandBytes;
       _pendingCommandBytes = null;
       if (next != null) {
@@ -642,33 +574,26 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
     _activeCommand = cmd;
     notifyListeners();
     final bytes = cmd.wireBytes.toList();
-    // E-stop bypasses the serializer: preempts any pending command and sends
-    // immediately after the current in-flight write (or right now if idle).
+
     _pendingCommandBytes = bytes;
     if (!_commandInFlight) {
       final pending = _pendingCommandBytes!;
       _pendingCommandBytes = null;
       await _writeBytes(pending);
     }
-    // If a write is in flight it will drain _pendingCommandBytes next,
-    // ensuring the E-stop is the very next thing written.
   }
 
-  /// Immediately latches E-stop and terminates the BLE session.
-  /// Called when the device leaves foreground or a hardware safety button fires.
-  /// The caller does not need to await — fire-and-forget is safe here.
   Future<void> triggerSafeDisconnect() async {
     if (!isConnected) return;
-    // Latch state synchronously so the UI reflects the emergency immediately.
+
     _estopLatched = true;
     _deadmanHeld = false;
     _clearDirectionalHolds(notify: false);
     _activeCommand = PlcOutputCommand.emergencyStop();
-    // Discard any queued motion command so it cannot race the safe-state write.
+
     _pendingCommandBytes = null;
     notifyListeners();
-    // BleService.disconnect() writes emergencyStop wireBytes before tearing
-    // down the BLE link, giving the PLC one last chance to enter safe state.
+
     await _bleService.disconnect();
   }
 
@@ -832,7 +757,6 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
     _errorMessage = null;
     _deviceTrustRejected = false;
 
-    // Ensure device identity is available (getOrCreate is idempotent).
     if (_deviceId.isEmpty) {
       _deviceId = await DeviceIdentityService.getOrCreate();
     }
@@ -885,10 +809,6 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
 
   // ── Biometric authentication ──────────────────────────────────────────────
 
-  /// Checks and caches device biometric availability and app-level enrollment.
-  ///
-  /// Called during [initialize] and after any enrollment change. Safe to call
-  /// at any time — reads only from the local keystore, no BLE I/O.
   Future<void> checkBiometricStatus() async {
     _biometricAvailable = await BiometricService.isAvailableAndEnrolled();
     _biometricEnrolled =
@@ -896,11 +816,6 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
-  /// Enrolls biometric credentials for this device after a successful manual
-  /// PLC-authenticated login.
-  ///
-  /// Returns true on success, false if the Keystore write fails.
-  /// MUST only be called after [authenticate] has returned true.
   Future<bool> enrollBiometrics({
     required String email,
     required String password,
@@ -919,14 +834,6 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  /// Authenticates the operator via device biometrics, then runs the full
-  /// PLC authentication pipeline with the stored operator credentials.
-  ///
-  /// The PLC ALWAYS validates the operator — biometric authentication is a
-  /// local convenience layer only. It never bypasses PLC-side validation,
-  /// single-operator enforcement, or the AES-GCM encrypted auth pipeline.
-  ///
-  /// Returns a [BiometricAuthResult] describing the outcome.
   Future<BiometricAuthResult> authenticateWithBiometrics() async {
     if (!_biometricAvailable || !_biometricEnrolled) {
       return const BiometricAuthResult(
@@ -935,14 +842,14 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
       );
     }
 
-    // Step 1 — Local biometric verification (device biometric hardware gate).
+    //  Local biometric verification (device biometric hardware gate).
     final biometricResult = await BiometricService.authenticate();
     if (!biometricResult.isSuccess) {
       return biometricResult;
     }
 
-    // Step 2 — Retrieve credentials from hardware-backed secure storage.
-    //           Only reachable after successful biometric verification above.
+    // Retrieve credentials from hardware-backed secure storage.
+
     final credentials = await SecureCredentialStore.retrieveCredentials();
     if (credentials == null) {
       _biometricEnrolled = false;
@@ -954,9 +861,8 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
       );
     }
 
-    // Step 3 — Full PLC authentication via AES-GCM encrypted pipeline.
-    //           PLC validates the operator, enforces single-operator policy,
-    //           and returns AUTH_OK / AUTH_FAIL as normal.
+    // PLC validates the operator, enforces single-operator policy,
+    // and returns AUTH_OK / AUTH_FAIL as normal.
     _errorMessage = null;
     final plcSuccess = await authenticate(
       email: credentials.email,
@@ -964,14 +870,13 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
     );
 
     if (!plcSuccess) {
-      // PLC rejected stored credentials — they are stale or revoked.
-      // Clear enrollment so the operator must log in manually to re-enroll.
       await SecureCredentialStore.clearCredentials();
       _biometricEnrolled = false;
       notifyListeners();
       return BiometricAuthResult(
         status: BiometricAuthStatus.failure,
-        message: _errorMessage ??
+        message:
+            _errorMessage ??
             'PLC rejected stored operator credentials. Please log in manually.',
       );
     }
@@ -979,20 +884,12 @@ class CraneController extends ChangeNotifier with WidgetsBindingObserver {
     return const BiometricAuthResult(status: BiometricAuthStatus.success);
   }
 
-  /// Clears stored biometric credentials and resets enrollment state.
-  ///
-  /// Call when an operator explicitly revokes biometric access.
   Future<void> clearBiometricEnrollment() async {
     await SecureCredentialStore.clearCredentials();
     _biometricEnrolled = false;
     notifyListeners();
   }
 
-  /// Releases the enrollment-offer screen hold, allowing the app to navigate
-  /// from the authentication screen to the control screen.
-  ///
-  /// Must be called by the UI exactly once after the biometric enrollment
-  /// dialog has been resolved — whether accepted or dismissed.
   void completePendingEnrollmentOffer() {
     if (!_pendingEnrollmentOffer) return;
     _pendingEnrollmentOffer = false;

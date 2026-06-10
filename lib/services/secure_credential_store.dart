@@ -12,7 +12,6 @@ class SecureCredentialStore {
     ),
   );
 
-  
   static const String _kEmail = 'bio_op_email_v1';
   static const String _kPassword = 'bio_op_password_v1';
   static const String _kEnrolled = 'bio_enrolled_v1';
@@ -38,7 +37,6 @@ class SecureCredentialStore {
 
   //  Write
 
-
   static Future<void> storeCredentials({
     required String email,
     required String password,
@@ -48,9 +46,8 @@ class SecureCredentialStore {
     await _storage.write(key: _kEnrolled, value: 'true');
   }
 
-  // Read 
+  // Read
 
- 
   static Future<({String email, String password})?>
   retrieveCredentials() async {
     try {
@@ -70,8 +67,7 @@ class SecureCredentialStore {
     }
   }
 
-  //  Revocation 
-
+  //  Revocation
 
   static Future<void> clearCredentials() async {
     try {

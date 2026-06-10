@@ -14,8 +14,8 @@ class CustomCircularStepProgressIndicator extends StatefulWidget {
     required this.width,
     required this.height,
     this.padding = 0,
-    this.startingAngle = -math.pi / 2, // Default: top (-90°)
-    this.arcSize = math.pi * 2, // Default: full circle
+    this.startingAngle = -math.pi / 2, //  top (-90°)
+    this.arcSize = math.pi * 2, // full circle
     this.gradientColor,
     this.backgroundColor,
     this.strokeCap = StrokeCap.round,
@@ -160,8 +160,6 @@ class _CustomCircularStepProgressIndicatorState
   }
 }
 
-// Custom Painter
-
 class _CircularStepPainter extends CustomPainter {
   _CircularStepPainter({
     required this.totalSteps,
@@ -201,7 +199,7 @@ class _CircularStepPainter extends CustomPainter {
     final Offset center = rect.center;
     final double radius = (min(size.width, size.height) / 2) - (stepSize / 2);
 
-    // Draw background circle (optional)
+    // Draw background circle
     if (backgroundColor != null) {
       canvas.drawCircle(center, radius + stepSize / 2, _backgroundPaint);
     }
@@ -219,14 +217,13 @@ class _CircularStepPainter extends CustomPainter {
       final double startAngle = startingAngle + (i * stepAngle) + padding;
       final double endAngle = startAngle + effectiveStepAngle;
 
-      // Select color (with gradient if applicable)
+      // Select color
       final Paint paint = Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = stepSize
         ..strokeCap = strokeCap;
 
       if (isSelected && gradientColor != null) {
-        // Use gradient for selected steps
         final Gradient gradient = gradientColor!;
 
         final Shader shader = gradient.createShader(
@@ -239,7 +236,6 @@ class _CircularStepPainter extends CustomPainter {
         paint.color = unselectedColor;
       }
 
-      // Draw the arc for this step
       canvas.drawArc(
         Rect.fromCircle(center: center, radius: radius),
         startAngle,

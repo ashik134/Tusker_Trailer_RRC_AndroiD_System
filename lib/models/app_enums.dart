@@ -1,22 +1,16 @@
-// ── App navigation ────────────────────────────────────────────────────────────
-
-/// Top-level screen destinations driven by [CraneController.currentScreen].
+// App navigation
 enum AppScreen { connection, authentication, control }
 
-// ── Motion state ──────────────────────────────────────────────────────────────
+// Moton state
 
-/// Derived hoist state — computed from the active [PlcOutputCommand].
 enum HoistState { idle, upSlow, upFast, downSlow, downFast }
 
-/// Motion axes used for mutual-exclusion directional-hold resolution.
 enum MotionAxis { vertical, horizontal }
 
-/// Three-stage control input level used by slider and legacy tap-button widgets.
 enum ControlState { idle, slow, fast }
 
-// ── PLC hardware model ────────────────────────────────────────────────────────
+// PLC hardware model
 
-/// PLC controller model/type detected from BLE advertisement manufacturer data.
 enum PlcType {
   plc14('PLC14'),
   plc21('PLC21'),
@@ -25,11 +19,8 @@ enum PlcType {
 
   const PlcType(this.displayName);
 
-  /// Human-readable label (e.g. 'PLC14', 'Unknown PLC').
   final String displayName;
 
-  /// Parses the raw manufacturer-data string recovered from BLE advertisement.
-  /// Returns [PlcType.unknown] for any unrecognised or null value.
   static PlcType fromString(String? value) {
     switch (value) {
       case 'PLC14':
@@ -44,9 +35,8 @@ enum PlcType {
   }
 }
 
-// ── Permissions ───────────────────────────────────────────────────────────────
+// Permissions
 
-/// Result of a Bluetooth/location permission request.
 class PermissionState {
   const PermissionState({
     required this.isGranted,
@@ -57,9 +47,7 @@ class PermissionState {
     : isGranted = false,
       isPermanentlyDenied = false;
 
-  /// True when all permissions required for BLE scanning are granted.
   final bool isGranted;
 
-  /// True when the user has permanently denied at least one required permission.
   final bool isPermanentlyDenied;
 }
