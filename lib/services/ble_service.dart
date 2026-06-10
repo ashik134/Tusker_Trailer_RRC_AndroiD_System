@@ -69,21 +69,14 @@ class BleService {
 
   bool _connectCancelled = false;
 
-  // ── Device cache — prevents list flicker during scan/pause cycles ──────────────
-  // lastSeenAt is embedded in BleScanDevice itself; no separate timestamp map needed.
   final Map<String, BleScanDevice> _deviceCache = {};
   Timer? _pruneTimer;
-  // Prune timer fires every 3 s so the UI can re-check each device's staleStatus
-  // (computed from DateTime.now() at render time) without a per-card timer.
-  // Must stay in sync with BleScanDevice.expireThreshold.
+
   static const Duration _deviceExpireTimeout = Duration(seconds: 20);
   static const Duration _pruneInterval = Duration(seconds: 3);
 
-  // ── Scan cycle tuning ───────────────────────────────────────────────────────
-  // Active burst: 6 s lets Android balanced-mode deliver multiple ad windows.
-  // Pause: 1.5 s lets the radio rest; UI status stays 'scanning' throughout
-  // so device cards never flicker and the progress indicator keeps spinning.
-  // Session cap: 3 minutes prevents accidental indefinite drain in the field.
+  // ── Scan cycle tuning
+
   static const Duration _scanBurstDuration = Duration(seconds: 6);
   static const Duration _scanPauseDuration = Duration(milliseconds: 1500);
   static const Duration _maxScanSessionDuration = Duration(minutes: 3);
@@ -102,9 +95,6 @@ class BleService {
 
   // ── Scanning ───────────────────────────────────────────────────────────────
 
-  /// Starts a brand-new 3-minute scan session.
-  /// Clears the device cache so the new session starts with a clean slate
-  /// (any frozen devices from a prior session are discarded).
   Future<void> startScan() async {
     _scanShouldContinue = false;
     _scanPaused = false;
@@ -116,20 +106,14 @@ class BleService {
     await _scanResultsSub?.cancel();
     _scanResultsSub = null;
 
-    // Clear stale/frozen remnants — new session discovers devices fresh.
     _deviceCache.clear();
     _scanSessionDeadline = DateTime.now().add(_maxScanSessionDuration);
     await _startOrResumeScanSession();
   }
 
-  /// Pauses the active scan session — stops the BLE radio burst, cancels the
-  /// prune timer, and freezes every device as [DeviceStaleStatus.active].
-  ///
-  /// The connection status intentionally stays 'scanning' during the pause
-  /// so that no UI resets occur while the user is on another screen.
   Future<void> pauseScan() async {
-    if (_scanSessionDeadline == null) return; // no active session
-    if (_scanPaused) return; // already paused
+    if (_scanSessionDeadline == null) return;
+    if (_scanPaused) return;
     _scanPaused = true;
     _scanShouldContinue = false;
     if (FlutterBluePlus.isScanningNow) {
@@ -137,19 +121,15 @@ class BleService {
     }
     await _scanResultsSub?.cancel();
     _scanResultsSub = null;
-    // Freeze device states so cards cannot age while the screen is inactive.
-    // Session deadline is preserved for resumeScan().
+
     _freezeCache();
   }
 
-  /// Resumes a previously paused scan session using the preserved deadline.
-  /// No-op if no session is active or if the session expired while paused.
   Future<void> resumeScan() async {
     if (_scanShouldContinue) return; // loop already running
     final deadline = _scanSessionDeadline;
     if (deadline == null) return; // no session to resume
 
-    // Session expired while paused — finalize cleanly.
     if (deadline.difference(DateTime.now()).inSeconds < 1) {
       _scanPaused = false;
       _scanSessionDeadline = null;
@@ -167,23 +147,15 @@ class BleService {
     await _startOrResumeScanSession();
   }
 
-  /// Core scan loop shared by [startScan] and [resumeScan].
-  /// Unfreezes the cache, runs burst/pause cycles until the session deadline
-  /// expires or [_scanShouldContinue] is cleared, then freezes the cache and
-  /// finalizes status (or leaves status as 'scanning' if merely paused).
   Future<void> _startOrResumeScanSession() async {
-    // Unfreeze devices so staleStatus resumes live computation and refresh
-    // lastSeenAt so devices start fresh rather than immediately stale.
     _unfreezeCache();
     _emit(BleConnectionStatus.scanning);
     _scanShouldContinue = true;
 
-    // Re-emit cache immediately so the UI shows previously seen devices.
     if (_deviceCache.isNotEmpty) {
       _scanController.add(List.unmodifiable(_deviceCache.values.toList()));
     }
 
-    // (Re)start the prune timer — always create a fresh one here.
     _pruneTimer?.cancel();
     _pruneTimer = Timer.periodic(_pruneInterval, (_) => _pruneStaleDevices());
 
@@ -203,11 +175,6 @@ class BleService {
             continue;
           }
 
-          // lastSeenAt = result.timeStamp (the actual advertisement time).
-          // Do NOT use DateTime.now() here: FBP emits the full cumulative
-          // device list on every advertisement from any device, so now would
-          // refresh lastSeenAt for devices that stopped advertising, breaking
-          // stale detection.
           final device = BleScanDevice.fromScanResult(result);
           final existing = _deviceCache[device.id];
 
@@ -218,9 +185,6 @@ class BleService {
             _deviceCache[device.id] = device;
             changed = true;
           } else {
-            // RSSI unchanged and not yet stale: refresh lastSeenAt using the
-            // advertisement's own timestamp (not DateTime.now()) so the clock
-            // advances only when the device actually re-advertises.
             _deviceCache[device.id] = existing.copyWith(
               lastSeenAt: device.lastSeenAt,
             );
@@ -266,12 +230,8 @@ class BleService {
     await _scanResultsSub?.cancel();
     _scanResultsSub = null;
 
-    // Freeze the cache regardless of why the loop exited so devices cannot
-    // age between now and the next scan session start.
     _freezeCache();
 
-    // If the loop exited because it was paused, preserve the scanning status
-    // so the UI does not reset. Otherwise the session truly ended — finalize.
     if (!_scanPaused) {
       _scanSessionDeadline = null;
       if (_snapshot.status == BleConnectionStatus.scanning) {
@@ -280,10 +240,6 @@ class BleService {
     }
   }
 
-  /// Stops scanning explicitly (user STOP action).
-  /// Freezes the device cache so cards stay at their last known state.
-  /// Does NOT clear the cache — devices remain visible until a new scan
-  /// session is started (which clears the cache in [startScan]).
   Future<void> stopScan() async {
     _scanShouldContinue = false;
     _scanPaused = false;
@@ -302,23 +258,6 @@ class BleService {
 
   // ── Cache freeze / unfreeze ───────────────────────────────────────────────
 
-  /// Freezes every cached device as [DeviceStaleStatus.active] and cancels
-  /// the prune timer.
-  ///
-  /// Devices that are still in the cache when scanning stops were observed
-  /// during this scan session. Genuinely-gone devices have already been
-  /// removed by [_pruneStaleDevices] before this runs, so freezing remaining
-  /// entries as active is always correct and prevents misleading
-  /// "Stale" / "Not advertising" indicators after the radio goes idle.
-  ///
-  /// After this call, [BleScanDevice.staleStatus] returns a deterministic,
-  /// time-independent value on every widget rebuild. No device is pruned
-  /// while frozen.
-  ///
-  /// Pass [forceEmit] = true to broadcast the cache on [_scanController] even
-  /// when every device was already frozen (i.e. no structural change). This is
-  /// needed after [_handleDisconnect] so [CraneController._scanSubscription]
-  /// receives a fresh emission now that the connection guard has been cleared.
   void _freezeCache({bool forceEmit = false}) {
     _pruneTimer?.cancel();
     _pruneTimer = null;
@@ -327,10 +266,6 @@ class BleService {
     for (final id in _deviceCache.keys.toList()) {
       final d = _deviceCache[id]!;
       if (d.frozenStatus == null) {
-        // Always freeze as active — stale/expired states are only meaningful
-        // while the radio is running. Preserving a computed stale status at
-        // freeze time would show misleading warnings on the scan page whenever
-        // the user returns after connecting or backgrounding the app.
         _deviceCache[id] = d.copyWith(frozenStatus: DeviceStaleStatus.active);
         changed = true;
       }
@@ -340,10 +275,6 @@ class BleService {
     }
   }
 
-  /// Clears the frozen status from every cached device and refreshes
-  /// [lastSeenAt] to [DateTime.now()] so the fresh scan burst begins with
-  /// all devices treated as active (they will naturally become stale if they
-  /// stop advertising within the new burst cycle).
   void _unfreezeCache() {
     if (_deviceCache.isEmpty) return;
     final now = DateTime.now();
@@ -357,8 +288,7 @@ class BleService {
 
   void _pruneStaleDevices() {
     final now = DateTime.now();
-    // Only prune live (unfrozen) devices. Frozen devices are preserved exactly
-    // as they were when scanning stopped and must not be silently removed.
+
     final expiredIds = _deviceCache.entries
         .where(
           (e) =>
@@ -378,8 +308,6 @@ class BleService {
       );
     }
 
-    // Re-emit so widgets re-evaluate staleStatus (live devices only — frozen
-    // ones already carry a deterministic value from _freezeCache()).
     if (_deviceCache.isNotEmpty || expiredIds.isNotEmpty) {
       _scanController.add(List.unmodifiable(_deviceCache.values.toList()));
     }
@@ -388,17 +316,8 @@ class BleService {
   // ── Connection ─────────────────────────────────────────────────────────────
 
   Future<void> connect(BleScanDevice scanDevice) async {
-    // Scanning is intentionally NOT stopped here. The scan session continues
-    // running while the connection attempt is in progress so the device list
-    // remains stable and populated. The scan will be paused automatically by
-    // ConnectionScreen.dispose() when the UI navigates away to the auth screen.
     await disconnect(emitState: false);
 
-    // Assign the target device BEFORE emitting 'connecting'.
-    // _emit() calls broadcast-stream listeners synchronously, so
-    // CraneController.connectionState.connectedDevice must already be
-    // populated when isConnecting first becomes true — otherwise the UI
-    // null-guard fires and shows an empty-device state for one frame.
     _connectedDevice = scanDevice;
     _device = scanDevice.device;
     _emit(BleConnectionStatus.connecting);
@@ -430,13 +349,8 @@ class BleService {
       );
       await _discoverServices();
     } catch (e) {
-      // If the failure was triggered by cancelConnecting(), let that method
-      // own the state transition — do not emit an error here.
       if (_connectCancelled) return;
 
-      // Clean up connection-state subscription before emitting error so
-      // the BLE disconnect event that follows does not trigger _handleDisconnect
-      // and overwrite the error state we are about to emit.
       _connStateSub?.cancel();
       _connStateSub = null;
       _device = null;
@@ -446,8 +360,7 @@ class BleService {
       final errStr = e.toString().toLowerCase();
       if (errStr.contains('timed out') || errStr.contains('timeout')) {
         message = 'Controller unreachable — device is out of range or offline.';
-        // Auto-clear the error banner after 3 s so the UI returns to the idle
-        // scan state without requiring an explicit user action.
+
         Future.delayed(const Duration(seconds: 3), () {
           if (!_isDisposing && _snapshot.status == BleConnectionStatus.error) {
             _emit(BleConnectionStatus.disconnected);
@@ -462,7 +375,6 @@ class BleService {
       return;
     }
 
-    // Monitor for unexpected disconnection.
     _connStateSub?.cancel();
     _connStateSub = _device!.connectionState.listen((state) {
       if (state == BluetoothConnectionState.disconnected) {
@@ -471,18 +383,10 @@ class BleService {
     });
   }
 
-  // Discover services and map characteristics.
   Future<void> _discoverServices() async {
     try {
-      // ── Stage: discoveringServices ──────────────────────────────────────
       _emit(BleConnectionStatus.discoveringServices);
 
-      // Negotiate a larger ATT MTU before any characteristic writes.
-      // AES-GCM encrypted digital-characteristic payloads (nonce + ciphertext +
-      // tag, hex-encoded) reach ~78 bytes — well above the default 20-byte ATT
-      // payload.  Without explicit negotiation the Android BLE stack falls back
-      // to Prepare Write / Execute Write (long-write procedure), which is not
-      // guaranteed to be handled correctly by all ESP32 NimBLE configurations.
       if (!kIsWeb && Platform.isAndroid) {
         try {
           final negotiatedMtu = await _device!.requestMtu(512);
@@ -501,7 +405,7 @@ class BleService {
       _authChar = null;
 
       _statusChar = null;
-      _heartbeatChar = null; // reset before each discovery pass
+      _heartbeatChar = null;
       _digitalCharWriteNoResponse = false;
 
       for (final service in services) {
@@ -536,7 +440,6 @@ class BleService {
         }
       }
 
-      //
       if (digital == null || auth == null || status == null) {
         await _device!.disconnect();
         _connectedDevice = null;
@@ -550,9 +453,7 @@ class BleService {
       _digitalChar = digital;
       _authChar = auth;
       _statusChar = status;
-      // _heartbeatChar was assigned inline above (optional — no error if absent).
 
-      // ── Stage: configuringNotifications ────────────────────────────────
       _emit(BleConnectionStatus.configuringNotifications);
 
       if (!_digitalCharWriteNoResponse) {
@@ -585,7 +486,6 @@ class BleService {
       _device!.cancelWhenDisconnected(_authSubscription!, next: true);
       _device!.cancelWhenDisconnected(_statusSubscription!, next: true);
 
-      // ── Stage: initializingSafeState ──────────────────────────────────
       _emit(BleConnectionStatus.initializingSafeState);
 
       await _sendSafeStatePreAuthBestEffort();
@@ -616,7 +516,6 @@ class BleService {
     _statusChar = null;
     _heartbeatChar = null;
 
-    // Abort the pending BLE connect attempt.
     if (device != null) {
       try {
         await device.disconnect();
@@ -871,7 +770,6 @@ class BleService {
   }
 
   /// Immediately enters safe state after a cryptographic validation failure.
-  ///
   /// This is triggered whenever decryption, tag verification, session
   /// validation, counter validation, or replay detection fails on an inbound
   /// BLE packet.
