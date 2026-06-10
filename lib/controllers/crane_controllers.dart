@@ -2,37 +2,35 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:tusker_trailer_rrc/models/app_enums.dart';
+import 'package:tusker_trailer_rrc/models/ble_connection_state.dart';
 import 'package:tusker_trailer_rrc/models/ble_scan_device.dart';
 import 'package:tusker_trailer_rrc/models/plc_output_command.dart';
 import 'package:tusker_trailer_rrc/services/ble_service.dart';
+import 'package:tusker_trailer_rrc/services/biometric_service.dart';
+import 'package:tusker_trailer_rrc/services/secure_credential_store.dart';
 import 'package:tusker_trailer_rrc/services/permission_service.dart';
+import 'package:tusker_trailer_rrc/services/device_identity_service.dart';
 import 'package:tusker_trailer_rrc/utils/constants.dart';
 import 'package:tusker_trailer_rrc/utils/preferences.dart';
 
-enum AppScreen { connection, authentication, control }
-
-enum HoistState { idle, upSlow, upFast, downSlow, downFast }
-
-class CraneController extends ChangeNotifier {
+class CraneController extends ChangeNotifier with WidgetsBindingObserver {
   final BleService _bleService = BleService();
   final PermissionService _permissionService = PermissionService();
   final AppPreferences _preferences = AppPreferences();
 
   StreamSubscription<BleConnectionState>? _connStateSubscription;
   StreamSubscription<List<BleScanDevice>>? _scanSubscription;
-  StreamSubscription<Map<String, int>>? _analogSubscription;
   StreamSubscription<PlcOutputCommand>? _statusSubscription;
   StreamSubscription<BluetoothAdapterState>? _adapterSubscription;
 
   BleConnectionState _transportConnState = BleConnectionState.initial();
   BleConnectionStatus _lastConnectionStatus = BleConnectionStatus.disconnected;
   List<BleScanDevice> _devices = const [];
-  Map<String, int> _analogValues = {};
+
   PlcOutputCommand _activeCommand = PlcOutputCommand.idle();
 
-  // ── BLE write serializer ──────────────────────────────────────────────────
-  // Prevents BLE queue flooding when commands arrive faster than writes complete.
-  // Only one write is in flight at a time; the latest pending command wins.
+  // BLE write serializer
   bool _commandInFlight = false;
   List<int>? _pendingCommandBytes;
 
@@ -45,16 +43,26 @@ class CraneController extends ChangeNotifier {
   bool _rememberCredentials = true;
   bool _estopLatched = false;
   bool _startupEmergencyArmedForConnection = false;
+  bool _biometricAvailable = false;
+  bool _biometricEnrolled = false;
+
+  bool _pendingEnrollmentOffer = false;
   String? _sessionEmail;
   String? _errorMessage;
   String _savedEmail = '';
   String _savedPassword = '';
+  String _deviceId = '';
+
+  bool _deviceTrustRejected = false;
   final Set<HoistDirection> _activeDirectionalHolds = <HoistDirection>{};
-  HoistDirection? _directionLock;
-  // bool _conflictActive = false;
-  // bool _upActive = false;
-  // bool _downActive = false;
-  // bool _fastActive = false;
+  HoistDirection? _verticalDirectionLock;
+  HoistDirection? _horizontalDirectionLock;
+  bool _deadmanHeld = false;
+
+  bool _cancellingConnection = false;
+  BleScanDevice? _cancellingDevice;
+
+  bool _pendingAuthTimeoutSnack = false;
 
   bool get isInitializing => _initializing;
   bool get bluetoothReady => _bluetoothReady;
@@ -66,23 +74,27 @@ class CraneController extends ChangeNotifier {
     _permissionBannerDismissed = true;
     notifyListeners();
   }
-  //  bool get conflictActive => _conflictActive;
-  //  bool get upActive => _upActive;
-  // bool get downActive => _downActive;
-  // bool get fastActive => _fastActive;
 
   bool get rememberCredentials => _rememberCredentials;
+  bool get isBiometricAvailable => _biometricAvailable;
+  bool get isBiometricEnrolled => _biometricEnrolled;
+
+  bool get hasPendingEnrollmentOffer => _pendingEnrollmentOffer;
   PlcOutputCommand get activeCommand => _activeCommand;
   bool get estopLatched => _estopLatched;
-    bool get upHoldActive =>
-      _activeDirectionalHolds.contains(HoistDirection.up);
-    bool get downHoldActive =>
+  bool get upHoldActive => _activeDirectionalHolds.contains(HoistDirection.up);
+  bool get downHoldActive =>
       _activeDirectionalHolds.contains(HoistDirection.down);
-    HoistDirection? get directionLock => _directionLock;
+  bool get leftHoldActive =>
+      _activeDirectionalHolds.contains(HoistDirection.left);
+  bool get rightHoldActive =>
+      _activeDirectionalHolds.contains(HoistDirection.right);
+  bool get deadmanActive => _deadmanHeld;
+  bool get deadmanHeld => _deadmanHeld;
   String? get sessionEmail => _sessionEmail;
   String? get errorMessage => _errorMessage ?? _transportConnState.message;
   List<BleScanDevice> get devices => _devices;
-  Map<String, int> get analogValues => _analogValues;
+
   String get savedEmail => _savedEmail;
   String get savedPassword => _savedPassword;
   BleConnectionState get connectionState => _transportConnState;
@@ -90,6 +102,13 @@ class CraneController extends ChangeNotifier {
       _transportConnState.status == BleConnectionStatus.scanning;
   bool get isConnecting =>
       _transportConnState.status == BleConnectionStatus.connecting;
+  bool get isDiscoveringServices =>
+      _transportConnState.status == BleConnectionStatus.discoveringServices;
+  bool get isConfiguringNotifications =>
+      _transportConnState.status ==
+      BleConnectionStatus.configuringNotifications;
+  bool get isInitializingSafeState =>
+      _transportConnState.status == BleConnectionStatus.initializingSafeState;
   bool get isAuthenticating =>
       _transportConnState.status == BleConnectionStatus.authenticating;
   bool get isConnected =>
@@ -102,53 +121,83 @@ class CraneController extends ChangeNotifier {
   bool get isAwaitingAuthentication =>
       _transportConnState.status == BleConnectionStatus.awaitingAuthentication;
 
-  // ── Analog sensor values ────────────────────────────────────────────────
-  int get a1 => _analogValues['A1'] ?? 0;
-  int get a2 => _analogValues['A2'] ?? 0;
+  bool get isConnectionActive =>
+      _transportConnState.status == BleConnectionStatus.connecting ||
+      _transportConnState.status == BleConnectionStatus.discoveringServices ||
+      _transportConnState.status ==
+          BleConnectionStatus.configuringNotifications ||
+      _transportConnState.status == BleConnectionStatus.initializingSafeState ||
+      _transportConnState.status == BleConnectionStatus.connected ||
+      _transportConnState.status ==
+          BleConnectionStatus.awaitingAuthentication ||
+      _transportConnState.status == BleConnectionStatus.authenticating;
 
-  // ── LED indicator states ─────────────────────────────────────────────────
-  // Emergency indicator must represent the active lockout condition only.
+  String get deviceId => _deviceId;
+
+  bool get isDeviceTrustRejected => _deviceTrustRejected;
+
+  bool get isCancellingConnection => _cancellingConnection;
+
+  bool get hasPendingAuthTimeoutNotification => _pendingAuthTimeoutSnack;
+
+  void consumeAuthTimeoutNotification() {
+    if (_pendingAuthTimeoutSnack) {
+      _pendingAuthTimeoutSnack = false;
+    }
+  }
+
+  BleScanDevice? get cancellingDevice => _cancellingDevice;
+
+  //  LED indicator states
+
   bool get ledEstop => _estopLatched;
-  bool get ledUp =>
-      _activeCommand.direction == HoistDirection.up && !_activeCommand.estop;
-  bool get ledDown =>
-      _activeCommand.direction == HoistDirection.down && !_activeCommand.estop;
+  bool get ledUp => _activeCommand.up && !_activeCommand.estop;
+  bool get ledDown => _activeCommand.down && !_activeCommand.estop;
+  bool get ledLeft => _activeCommand.left && !_activeCommand.estop;
+  bool get ledRight => _activeCommand.right && !_activeCommand.estop;
   bool get ledFast =>
       _activeCommand.speed == HoistSpeed.fast && !_activeCommand.estop;
 
-  // ── Connected device name ─────────────────────────────────────────────────
   String? get connectedDeviceName => _transportConnState.connectedDevice?.name;
+  int? get connectedDeviceRssi => _transportConnState.connectedDevice?.rssi;
+  PlcType? get connectedDevicePlcType =>
+      _transportConnState.connectedDevice?.plcType;
+
+  /// "RRC_PLC1 • PLC14"
+  String get connectedDeviceTitle {
+    final name = connectedDeviceName ?? BLEConstants.deviceName;
+    final plc = connectedDevicePlcType;
+    if (plc != null && plc != PlcType.unknown) {
+      return '$name \u2022 ${plc.displayName}';
+    }
+    return name;
+  }
 
   // ── Hoist state derived from active command ───────────────────────────────
   HoistState get hoistState {
-    if (_activeCommand.estop) return HoistState.idle;
-    return switch ((_activeCommand.direction, _activeCommand.speed)) {
-      (HoistDirection.up, HoistSpeed.slow) => HoistState.upSlow,
-      (HoistDirection.up, HoistSpeed.fast) => HoistState.upFast,
-      (HoistDirection.down, HoistSpeed.slow) => HoistState.downSlow,
-      (HoistDirection.down, HoistSpeed.fast) => HoistState.downFast,
+    if (_activeCommand.estop || _activeCommand.hasHorizontalMotion) {
+      return HoistState.idle;
+    }
+    return switch ((
+      _activeCommand.up,
+      _activeCommand.down,
+      _activeCommand.speed,
+    )) {
+      (true, false, HoistSpeed.fast) => HoistState.upFast,
+      (true, false, _) => HoistState.upSlow,
+      (false, true, HoistSpeed.fast) => HoistState.downFast,
+      (false, true, _) => HoistState.downSlow,
       _ => HoistState.idle,
     };
   }
 
-  //  ControlState get upStage {
-  //   if (_estopLatched || _conflictActive || !_upActive) {
-  //     return ControlState.idle;
-  //   }
-  //   return _fastActive ? ControlState.fast : ControlState.slow;
-  // }
-
-  //  ControlState get downStage {
-  //   if (_estopLatched || _conflictActive || !_downActive) {
-  //     return ControlState.idle;
-  //   }
-  //   return _fastActive ? ControlState.fast : ControlState.slow;
-  // }
-
   String get statusLabel => _activeCommand.statusLabel;
 
   AppScreen get currentScreen => switch (_transportConnState.status) {
-    BleConnectionStatus.authenticated => AppScreen.control,
+    BleConnectionStatus.authenticated =>
+      _pendingEnrollmentOffer ? AppScreen.authentication : AppScreen.control,
+
+    BleConnectionStatus.connected ||
     BleConnectionStatus.awaitingAuthentication ||
     BleConnectionStatus.authenticating => AppScreen.authentication,
     BleConnectionStatus.error
@@ -161,6 +210,8 @@ class CraneController extends ChangeNotifier {
     required bool estop,
     required bool up,
     required bool down,
+    bool left = false,
+    bool right = false,
     required bool fast,
   }) async {
     if (estop) {
@@ -173,16 +224,14 @@ class CraneController extends ChangeNotifier {
     }
 
     final PlcOutputCommand next;
-    if (up && down) {
+    if ((up && down) || (left && right)) {
       next = PlcOutputCommand.idle();
-    } else if (up) {
+    } else if (up || down || left || right) {
       next = PlcOutputCommand.motion(
-        direction: HoistDirection.up,
-        speed: fast ? HoistSpeed.fast : HoistSpeed.slow,
-      );
-    } else if (down) {
-      next = PlcOutputCommand.motion(
-        direction: HoistDirection.down,
+        up: up,
+        down: down,
+        left: left,
+        right: right,
         speed: fast ? HoistSpeed.fast : HoistSpeed.slow,
       );
     } else {
@@ -197,16 +246,17 @@ class CraneController extends ChangeNotifier {
     required bool pressed,
     bool fast = false,
   }) async {
-    if (direction != HoistDirection.up && direction != HoistDirection.down) {
+    if (direction == HoistDirection.idle) {
       return false;
     }
 
-    if (_estopLatched || !isConnected) {
+    final axis = _axisForDirection(direction);
+
+    if (_estopLatched || !isConnected || !deadmanActive) {
       if (!pressed) {
         _activeDirectionalHolds.remove(direction);
-        if (_directionLock == direction &&
-            !_activeDirectionalHolds.contains(direction)) {
-          _directionLock = null;
+        if (_lockForAxis(axis) == direction && !_hasHoldOnAxis(axis)) {
+          _setLockForAxis(axis, null);
         }
         notifyListeners();
       }
@@ -216,16 +266,16 @@ class CraneController extends ChangeNotifier {
     bool changed = false;
 
     if (pressed) {
-      if (_directionLock != null && _directionLock != direction) {
+      final lock = _lockForAxis(axis);
+      if (lock != null && lock != direction) {
         return false;
       }
       changed = _activeDirectionalHolds.add(direction);
-      _directionLock ??= direction;
+      _setLockForAxis(axis, direction);
     } else {
       changed = _activeDirectionalHolds.remove(direction);
-      if (_directionLock == direction &&
-          !_activeDirectionalHolds.contains(direction)) {
-        _directionLock = null;
+      if (_lockForAxis(axis) == direction && !_hasHoldOnAxis(axis)) {
+        _setLockForAxis(axis, null);
       }
     }
 
@@ -241,57 +291,7 @@ class CraneController extends ChangeNotifier {
     }
   }
 
-  // Future<void> sendCommand({
-  //   required bool estop,
-  //   required bool up,
-  //   required bool down,
-  //   required bool fast,
-  //   bool conflict = false,
-  // }) async {
-  //   if (estop) {
-  //     _estopLatched = true;
-  //     _upActive = false;
-  //     _downActive = false;
-  //     _fastActive = false;
-  //     _conflictActive = false;
-  //     notifyListeners();
-  //     debugPrint("E-STOP ACTIVATED! Sending E-STOP command to PLC...");
-  //     return;
-  //   }
-
-  //   if (_conflictActive && !conflict) {
-  //     return;
-  //   }
-
-  //   if (conflict || (up && down)) {
-  //     _conflictActive = true;
-  //     _upActive = false;
-  //     _downActive = false;
-  //     _fastActive = false;
-  //     notifyListeners();
-  //     debugPrint("CONFLICT DETECTED! Sending conflict state to PLC...");
-  //     return;
-  //   }
-  //   _estopLatched= false;
-  //   _conflictActive = false;
-  //   _upActive = up;
-  //   _downActive = down;
-  //   _fastActive = fast && (_upActive || _downActive);
-  //   notifyListeners();
-  // }
-  //  void clearConflict() {
-  //   _conflictActive = false;
-  //   _upActive = false;
-  //   _downActive = false;
-  //   _fastActive = false;
-  //   notifyListeners();
-  // }
-
-  bool verifyLocalPassword(String password) {
-    return password == 'Admin123';
-  }
-
-  // Initialization and Cleanup //////////////////////////////////////////////////////////////////////////////
+  // Initialization and Cleanup
   Future<void> initialize() {
     if (_initializeFuture != null) {
       return _initializeFuture!;
@@ -307,16 +307,20 @@ class CraneController extends ChangeNotifier {
     _attachStreamsIfNeeded();
 
     try {
-      final values = await Future.wait<String?>([
+      // Load device identity and saved credentials
+      final results = await Future.wait<dynamic>([
+        DeviceIdentityService.getOrCreate(),
         _preferences.getEmail(),
         _preferences.getPassword(),
       ]);
-      _savedEmail = values[0] ?? '';
-      _savedPassword = values[1] ?? '';
+      _deviceId = results[0] as String;
+      _savedEmail = (results[1] as String?) ?? '';
+      _savedPassword = (results[2] as String?) ?? '';
       _rememberCredentials =
           _savedEmail.isNotEmpty && _savedPassword.isNotEmpty;
 
       await _prepareRunTime();
+      await checkBiometricStatus();
       debugPrint(
         'Initialization complete. Bluetooth ready: $bluetoothReady, Permissions granted: $permissionsGranted',
       );
@@ -333,6 +337,7 @@ class CraneController extends ChangeNotifier {
       return;
     }
     _streamsAttached = true;
+    WidgetsBinding.instance.addObserver(this);
 
     _connStateSubscription = _bleService.connectionStream.listen((snapshot) {
       final previousStatus = _lastConnectionStatus;
@@ -342,30 +347,31 @@ class CraneController extends ChangeNotifier {
         _clearDirectionalHolds(notify: false);
         _activeCommand = PlcOutputCommand.idle();
         _estopLatched = false;
+        _deadmanHeld = false;
         _startupEmergencyArmedForConnection = false;
         _sessionEmail = null;
+        _pendingEnrollmentOffer = false;
+        _deviceTrustRejected = false;
       } else if (snapshot.status == BleConnectionStatus.authenticated &&
           previousStatus != BleConnectionStatus.authenticated) {
         unawaited(ensureControlEntryEmergencyLock());
+
+        if (_biometricAvailable && !_biometricEnrolled) {
+          _pendingEnrollmentOffer = true;
+        }
       }
       notifyListeners();
     });
 
     _scanSubscription = _bleService.scanStream.listen((devices) {
+      if (isConnectionActive || isConnected) return;
       _devices = devices;
-      notifyListeners();
-    });
-
-    _analogSubscription = _bleService.analogStream.listen((values) {
-      _analogValues = values;
       notifyListeners();
     });
 
     _statusSubscription = _bleService.statusStream.listen((command) {
       _activeCommand = command;
-      if (command.estop) {
-        _estopLatched = true;
-      }
+      if (command.estop) _estopLatched = true;
       notifyListeners();
     });
 
@@ -407,10 +413,31 @@ class CraneController extends ChangeNotifier {
     notifyListeners();
   }
 
-  //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  /// Device Scanning and Connection //////////////////////////////////////////////////////////////////////////////////
+  Future<void> pauseScan() async {
+    await _bleService.pauseScan();
+  }
+
+  Future<void> resumeScan() async {
+    if (!bluetoothReady || !permissionsGranted) return;
+    await _bleService.resumeScan();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached ||
+        state == AppLifecycleState.hidden) {
+      _bleService.pauseScan();
+    } else if (state == AppLifecycleState.resumed) {
+      if (currentScreen == AppScreen.connection) {
+        resumeScan();
+      }
+    }
+  }
+
   Future<void> scanForDevices() async {
     _errorMessage = null;
+    _pendingAuthTimeoutSnack = false;
 
     if (!permissionsGranted) {
       await refreshPermissions();
@@ -470,6 +497,19 @@ class CraneController extends ChangeNotifier {
     }
   }
 
+  Future<void> cancelConnecting() async {
+    if (_cancellingConnection) return;
+    _errorMessage = null;
+
+    _cancellingDevice = _transportConnState.connectedDevice;
+    _cancellingConnection = true;
+    notifyListeners();
+    await _bleService.cancelConnecting();
+    _cancellingConnection = false;
+    _cancellingDevice = null;
+    notifyListeners();
+  }
+
   void setRememberCredentials(bool value) {
     _rememberCredentials = value;
     notifyListeners();
@@ -478,13 +518,10 @@ class CraneController extends ChangeNotifier {
   Future<void> disconnect() async {
     _errorMessage = null;
 
-    // Best-effort safe stop before disconnecting transport.
     if (isConnected && !_estopLatched) {
       try {
         await _sendCommand(PlcOutputCommand.idle());
-      } catch (_) {
-        // Ignore: transport teardown below remains the final safety path.
-      }
+      } catch (_) {}
     }
 
     await _bleService.disconnect();
@@ -494,17 +531,15 @@ class CraneController extends ChangeNotifier {
   Future<void> stopScan() async {
     _errorMessage = null;
     await _bleService.stopScan();
-    // State transitions via _connStateSubscription when startScan() resolves.
   }
 
-  // ── Command helpers ───────────────────────────────────────────────────────
+  // Command helpers
 
   Future<void> _sendCommand(PlcOutputCommand command) async {
     _activeCommand = command;
     notifyListeners();
     final bytes = command.wireBytes.toList();
     if (_commandInFlight) {
-      // Replace whatever was pending — latest command wins.
       _pendingCommandBytes = bytes;
       return;
     }
@@ -515,7 +550,7 @@ class CraneController extends ChangeNotifier {
     _commandInFlight = true;
     try {
       await _bleService.writeDigital(bytes);
-      // Drain at most one pending command queued while this write was in flight.
+
       final next = _pendingCommandBytes;
       _pendingCommandBytes = null;
       if (next != null) {
@@ -533,27 +568,50 @@ class CraneController extends ChangeNotifier {
 
   Future<void> triggerEStop() async {
     _estopLatched = true;
+    _deadmanHeld = false;
     _clearDirectionalHolds(notify: false);
     final cmd = PlcOutputCommand.emergencyStop();
     _activeCommand = cmd;
     notifyListeners();
     final bytes = cmd.wireBytes.toList();
-    // E-stop bypasses the serializer: preempts any pending command and sends
-    // immediately after the current in-flight write (or right now if idle).
+
     _pendingCommandBytes = bytes;
     if (!_commandInFlight) {
       final pending = _pendingCommandBytes!;
       _pendingCommandBytes = null;
       await _writeBytes(pending);
     }
-    // If a write is in flight it will drain _pendingCommandBytes next,
-    // ensuring the E-stop is the very next thing written.
+  }
+
+  Future<void> triggerSafeDisconnect() async {
+    if (!isConnected) return;
+
+    _estopLatched = true;
+    _deadmanHeld = false;
+    _clearDirectionalHolds(notify: false);
+    _activeCommand = PlcOutputCommand.emergencyStop();
+
+    _pendingCommandBytes = null;
+    notifyListeners();
+
+    await _bleService.disconnect();
   }
 
   Future<void> resetEStop() async {
     _estopLatched = false;
     _clearDirectionalHolds(notify: false);
     await _sendCommand(PlcOutputCommand.idle());
+  }
+
+  Future<void> setDeadmanHeld(bool held) async {
+    // E-stop always overrides deadman — block while emergency is active.
+    if (_estopLatched) return;
+    if (_deadmanHeld == held) return;
+    _deadmanHeld = held;
+    notifyListeners();
+    if (!deadmanActive) {
+      await releaseAllDirectionalHolds();
+    }
   }
 
   Future<void> ensureControlEntryEmergencyLock() async {
@@ -564,26 +622,21 @@ class CraneController extends ChangeNotifier {
   }
 
   Future<void> _recomputeDirectionalCommandAndSend({required bool fast}) async {
-    final upHeld = _activeDirectionalHolds.contains(HoistDirection.up);
-    final downHeld = _activeDirectionalHolds.contains(HoistDirection.down);
+    final verticalDirection = _resolveAxisDirection(MotionAxis.vertical);
+    final horizontalDirection = _resolveAxisDirection(MotionAxis.horizontal);
 
-    HoistDirection resolvedDirection = HoistDirection.idle;
-    if (_directionLock != null && _activeDirectionalHolds.contains(_directionLock)) {
-      resolvedDirection = _directionLock!;
-    } else if (upHeld && !downHeld) {
-      resolvedDirection = HoistDirection.up;
-    } else if (downHeld && !upHeld) {
-      resolvedDirection = HoistDirection.down;
-    }
-
-    if (resolvedDirection == HoistDirection.idle) {
+    if (verticalDirection == HoistDirection.idle &&
+        horizontalDirection == HoistDirection.idle) {
       await _sendCommand(PlcOutputCommand.idle());
       return;
     }
 
     await _sendCommand(
       PlcOutputCommand.motion(
-        direction: resolvedDirection,
+        up: verticalDirection == HoistDirection.up,
+        down: verticalDirection == HoistDirection.down,
+        left: horizontalDirection == HoistDirection.left,
+        right: horizontalDirection == HoistDirection.right,
         speed: fast ? HoistSpeed.fast : HoistSpeed.slow,
       ),
     );
@@ -591,7 +644,8 @@ class CraneController extends ChangeNotifier {
 
   void _clearDirectionalHolds({required bool notify}) {
     _activeDirectionalHolds.clear();
-    _directionLock = null;
+    _verticalDirectionLock = null;
+    _horizontalDirectionLock = null;
     if (notify) {
       notifyListeners();
     }
@@ -603,26 +657,20 @@ class CraneController extends ChangeNotifier {
     if (isUp) {
       next = switch (hoistState) {
         HoistState.upSlow => PlcOutputCommand.motion(
-          direction: HoistDirection.up,
+          up: true,
           speed: HoistSpeed.fast,
         ),
         HoistState.upFast => PlcOutputCommand.idle(),
-        _ => PlcOutputCommand.motion(
-          direction: HoistDirection.up,
-          speed: HoistSpeed.slow,
-        ),
+        _ => PlcOutputCommand.motion(up: true, speed: HoistSpeed.slow),
       };
     } else {
       next = switch (hoistState) {
         HoistState.downSlow => PlcOutputCommand.motion(
-          direction: HoistDirection.down,
+          down: true,
           speed: HoistSpeed.fast,
         ),
         HoistState.downFast => PlcOutputCommand.idle(),
-        _ => PlcOutputCommand.motion(
-          direction: HoistDirection.down,
-          speed: HoistSpeed.slow,
-        ),
+        _ => PlcOutputCommand.motion(down: true, speed: HoistSpeed.slow),
       };
     }
     await _sendCommand(next);
@@ -636,15 +684,70 @@ class CraneController extends ChangeNotifier {
     final PlcOutputCommand cmd = switch (state) {
       ControlState.idle => PlcOutputCommand.idle(),
       ControlState.slow => PlcOutputCommand.motion(
-        direction: isUp ? HoistDirection.up : HoistDirection.down,
+        up: isUp,
+        down: !isUp,
         speed: HoistSpeed.slow,
       ),
       ControlState.fast => PlcOutputCommand.motion(
-        direction: isUp ? HoistDirection.up : HoistDirection.down,
+        up: isUp,
+        down: !isUp,
         speed: HoistSpeed.fast,
       ),
     };
     await _sendCommand(cmd);
+  }
+
+  MotionAxis _axisForDirection(HoistDirection direction) {
+    return switch (direction) {
+      HoistDirection.up || HoistDirection.down => MotionAxis.vertical,
+      HoistDirection.left || HoistDirection.right => MotionAxis.horizontal,
+      HoistDirection.idle => MotionAxis.vertical,
+    };
+  }
+
+  HoistDirection? _lockForAxis(MotionAxis axis) {
+    return switch (axis) {
+      MotionAxis.vertical => _verticalDirectionLock,
+      MotionAxis.horizontal => _horizontalDirectionLock,
+    };
+  }
+
+  void _setLockForAxis(MotionAxis axis, HoistDirection? direction) {
+    switch (axis) {
+      case MotionAxis.vertical:
+        _verticalDirectionLock = direction;
+      case MotionAxis.horizontal:
+        _horizontalDirectionLock = direction;
+    }
+  }
+
+  bool _hasHoldOnAxis(MotionAxis axis) {
+    return _activeDirectionalHolds.any(
+      (hold) => _axisForDirection(hold) == axis,
+    );
+  }
+
+  HoistDirection _resolveAxisDirection(MotionAxis axis) {
+    final lock = _lockForAxis(axis);
+    if (lock != null && _activeDirectionalHolds.contains(lock)) {
+      return lock;
+    }
+
+    return switch (axis) {
+      MotionAxis.vertical
+          when _activeDirectionalHolds.contains(HoistDirection.up) =>
+        HoistDirection.up,
+      MotionAxis.vertical
+          when _activeDirectionalHolds.contains(HoistDirection.down) =>
+        HoistDirection.down,
+      MotionAxis.horizontal
+          when _activeDirectionalHolds.contains(HoistDirection.left) =>
+        HoistDirection.left,
+      MotionAxis.horizontal
+          when _activeDirectionalHolds.contains(HoistDirection.right) =>
+        HoistDirection.right,
+      _ => HoistDirection.idle,
+    };
   }
 
   Future<bool> authenticate({
@@ -652,11 +755,17 @@ class CraneController extends ChangeNotifier {
     required String password,
   }) async {
     _errorMessage = null;
+    _deviceTrustRejected = false;
+
+    if (_deviceId.isEmpty) {
+      _deviceId = await DeviceIdentityService.getOrCreate();
+    }
 
     try {
       final outcome = await _bleService.authenticate(
         email: email.trim(),
         password: password,
+        deviceId: _deviceId,
       );
 
       if (outcome == BleAuthOutcome.success) {
@@ -674,9 +783,21 @@ class CraneController extends ChangeNotifier {
         return true;
       }
 
+      if (outcome == BleAuthOutcome.untrusted) {
+        _deviceTrustRejected = true;
+        _errorMessage =
+            'DEVICE NOT AUTHORIZED\nThis device is not registered with PLC 14. '
+            'Provide your Device ID to an administrator for registration.';
+        notifyListeners();
+        return false;
+      }
+
       _errorMessage = outcome == BleAuthOutcome.timedOut
           ? 'PLC authentication timed out.'
           : 'Credentials were rejected by PLC 14.';
+      if (outcome == BleAuthOutcome.timedOut) {
+        _pendingAuthTimeoutSnack = true;
+      }
       notifyListeners();
       return false;
     } catch (error) {
@@ -686,11 +807,100 @@ class CraneController extends ChangeNotifier {
     }
   }
 
+  // ── Biometric authentication ──────────────────────────────────────────────
+
+  Future<void> checkBiometricStatus() async {
+    _biometricAvailable = await BiometricService.isAvailableAndEnrolled();
+    _biometricEnrolled =
+        _biometricAvailable && await SecureCredentialStore.hasCredentials();
+    notifyListeners();
+  }
+
+  Future<bool> enrollBiometrics({
+    required String email,
+    required String password,
+  }) async {
+    if (!_biometricAvailable) return false;
+    try {
+      await SecureCredentialStore.storeCredentials(
+        email: email,
+        password: password,
+      );
+      _biometricEnrolled = true;
+      notifyListeners();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<BiometricAuthResult> authenticateWithBiometrics() async {
+    if (!_biometricAvailable || !_biometricEnrolled) {
+      return const BiometricAuthResult(
+        status: BiometricAuthStatus.notAvailable,
+        message: 'Biometric authentication is not configured on this device.',
+      );
+    }
+
+    //  Local biometric verification (device biometric hardware gate).
+    final biometricResult = await BiometricService.authenticate();
+    if (!biometricResult.isSuccess) {
+      return biometricResult;
+    }
+
+    // Retrieve credentials from hardware-backed secure storage.
+
+    final credentials = await SecureCredentialStore.retrieveCredentials();
+    if (credentials == null) {
+      _biometricEnrolled = false;
+      notifyListeners();
+      return const BiometricAuthResult(
+        status: BiometricAuthStatus.credentialsMissing,
+        message:
+            'Stored operator credentials not found. Log in manually to re-enable biometric access.',
+      );
+    }
+
+    // PLC validates the operator, enforces single-operator policy,
+    // and returns AUTH_OK / AUTH_FAIL as normal.
+    _errorMessage = null;
+    final plcSuccess = await authenticate(
+      email: credentials.email,
+      password: credentials.password,
+    );
+
+    if (!plcSuccess) {
+      await SecureCredentialStore.clearCredentials();
+      _biometricEnrolled = false;
+      notifyListeners();
+      return BiometricAuthResult(
+        status: BiometricAuthStatus.failure,
+        message:
+            _errorMessage ??
+            'PLC rejected stored operator credentials. Please log in manually.',
+      );
+    }
+
+    return const BiometricAuthResult(status: BiometricAuthStatus.success);
+  }
+
+  Future<void> clearBiometricEnrollment() async {
+    await SecureCredentialStore.clearCredentials();
+    _biometricEnrolled = false;
+    notifyListeners();
+  }
+
+  void completePendingEnrollmentOffer() {
+    if (!_pendingEnrollmentOffer) return;
+    _pendingEnrollmentOffer = false;
+    notifyListeners();
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _connStateSubscription?.cancel();
     _scanSubscription?.cancel();
-    _analogSubscription?.cancel();
     _statusSubscription?.cancel();
     _adapterSubscription?.cancel();
     _bleService.dispose();

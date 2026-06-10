@@ -1,18 +1,5 @@
 import 'package:permission_handler/permission_handler.dart';
-
-class PermissionState {
-  const PermissionState({
-    required this.isGranted,
-    required this.isPermanentlyDenied,
-  });
-
-  const PermissionState.initial()
-    : isGranted = false,
-      isPermanentlyDenied = false;
-
-  final bool isGranted;
-  final bool isPermanentlyDenied;
-}
+import 'package:tusker_trailer_rrc/models/app_enums.dart';
 
 class PermissionService {
   static const List<Permission> requiredPermissions = [

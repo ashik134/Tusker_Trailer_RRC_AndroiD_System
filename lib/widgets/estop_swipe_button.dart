@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import 'package:tusker_trailer_rrc/utils/constants.dart';
 
 class EStopSwipeButton extends StatefulWidget {
@@ -20,7 +21,7 @@ class EStopSwipeButton extends StatefulWidget {
 class _EStopSwipeButtonState extends State<EStopSwipeButton>
     with SingleTickerProviderStateMixin {
   static const double _thumbSize = 66.0;
-  static const double _buttonHeight = 74.0;
+  static const double _buttonHeight = 78.0;
   static const double _activationThreshold = 1.0;
 
   // ── drag state ──────────────────────────────────────────────────────────────
@@ -117,7 +118,7 @@ class _EStopSwipeButtonState extends State<EStopSwipeButton>
     }
   }
 
-  // ── build ────────────────────────────────────────────────────────────────────
+  // ──────────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -128,7 +129,6 @@ class _EStopSwipeButtonState extends State<EStopSwipeButton>
         final progress = _displayProgress;
 
         return GestureDetector(
-          // Only horizontal drag triggers the swipe; incidental taps are ignored.
           onHorizontalDragStart: _onDragStart,
           onHorizontalDragUpdate: _onDragUpdate,
           onHorizontalDragEnd: _onDragEnd,
@@ -158,7 +158,6 @@ class _EStopSwipeButtonState extends State<EStopSwipeButton>
                 borderRadius: BorderRadius.circular(14.5),
                 child: Stack(
                   children: [
-                    // ── track tick marks (decorative, industrial look) ──────
                     Positioned.fill(
                       child: CustomPaint(
                         painter: _TrackTickPainter(
@@ -168,7 +167,6 @@ class _EStopSwipeButtonState extends State<EStopSwipeButton>
                       ),
                     ),
 
-                    // ── progress fill ───────────────────────────────────────
                     Positioned(
                       left: 0,
                       top: 0,
@@ -193,7 +191,6 @@ class _EStopSwipeButtonState extends State<EStopSwipeButton>
                       ),
                     ),
 
-                    // ── instruction label ───────────────────────────────────
                     Positioned.fill(
                       child: Opacity(
                         opacity: (1.0 - progress * 1.5).clamp(0.0, 1.0),
@@ -287,8 +284,6 @@ class _EStopSwipeButtonState extends State<EStopSwipeButton>
   }
 }
 
-/// Paints evenly-spaced vertical tick marks on the track to reinforce the
-/// directional / industrial look without being distracting.
 class _TrackTickPainter extends CustomPainter {
   final double thumbEnd;
   final Color color;
@@ -304,7 +299,7 @@ class _TrackTickPainter extends CustomPainter {
     final count = (size.width / spacing).floor();
     for (int i = 1; i < count; i++) {
       final x = i * spacing;
-      if (x < thumbEnd) continue; // hide ticks under the fill
+      if (x < thumbEnd) continue;
       canvas.drawLine(
         Offset(x, size.height * 0.3),
         Offset(x, size.height * 0.7),

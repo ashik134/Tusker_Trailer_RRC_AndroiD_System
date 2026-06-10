@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
-
 import 'package:provider/provider.dart';
 
 import 'package:tusker_trailer_rrc/utils/constants.dart';
-import 'package:tusker_trailer_rrc/services/ble_service.dart';
+import 'package:tusker_trailer_rrc/screens/settings_screen.dart';
+import 'package:tusker_trailer_rrc/models/ble_connection_state.dart';
+import 'package:tusker_trailer_rrc/services/biometric_service.dart';
 import 'package:tusker_trailer_rrc/controllers/crane_controllers.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -21,12 +22,12 @@ class _LoginScreenState extends State<LoginScreen>
 
   bool _seeded = false;
   bool _obscurePassword = true;
+  bool _biometricLoading = false;
+  BiometricAuthResult? _lastBiometricResult;
   AutovalidateMode _autovalidateMode = AutovalidateMode.disabled;
 
   late final AnimationController _introController;
   late final AnimationController _pulseController;
-  late final Animation<double> _fadeAnimation;
-  late final Animation<Offset> _slideAnimation;
 
   @override
   void initState() {
@@ -40,24 +41,13 @@ class _LoginScreenState extends State<LoginScreen>
       duration: const Duration(milliseconds: 2200),
     )..repeat();
 
-    _fadeAnimation = CurvedAnimation(
-      parent: _introController,
-      curve: Curves.easeOutCubic,
-    );
-    _slideAnimation =
-        Tween<Offset>(begin: const Offset(0, 0.05), end: Offset.zero).animate(
-          CurvedAnimation(parent: _introController, curve: Curves.easeOutCubic),
-        );
-
     _introController.forward();
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_seeded) {
-      return;
-    }
+    if (_seeded) return;
 
     final controller = context.read<CraneController>();
     _emailController.text = controller.savedEmail;
@@ -90,110 +80,82 @@ class _LoginScreenState extends State<LoginScreen>
         ),
         child: Stack(
           children: [
-            Positioned(
-              top: -120,
-              right: -90,
-              child: Container(
-                width: 280,
-                height: 280,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: ConnectionColors.scanning.withValues(alpha: 0.08),
-                ),
-              ),
-            ),
-            Positioned(
-              bottom: -120,
-              left: -100,
-              child: Container(
-                width: 300,
-                height: 300,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: ConnectionColors.primary.withValues(alpha: 0.06),
-                ),
-              ),
-            ),
+            _buildBackgroundCircles(),
             SafeArea(
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final isWide = constraints.maxWidth >= 920;
-                  final edgePadding = constraints.maxWidth >= 1100
-                      ? 28.0
-                      : 16.0;
-
-                  return Center(
-                    child: SingleChildScrollView(
-                      padding: EdgeInsets.fromLTRB(
-                        edgePadding,
-                        16,
-                        edgePadding,
-                        18,
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 18,
+                  ),
+                  child: FadeTransition(
+                    opacity: _introController.drive(
+                      Tween<double>(begin: 0, end: 1),
+                    ),
+                    child: SlideTransition(
+                      position: _introController.drive(
+                        Tween<Offset>(
+                          begin: const Offset(0, 0.05),
+                          end: Offset.zero,
+                        ),
                       ),
-                      child: FadeTransition(
-                        opacity: _fadeAnimation,
-                        child: SlideTransition(
-                          position: _slideAnimation,
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 1100),
-                            child: Container(
-                              padding: EdgeInsets.all(isWide ? 18 : 12),
-                              decoration: BoxDecoration(
-                                color: const Color(
-                                  0xFFF2F7FD,
-                                ).withValues(alpha: 0.86),
-                                borderRadius: BorderRadius.circular(28),
-                                border: Border.all(
-                                  color: ConnectionColors.border,
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: ConnectionColors.primary.withValues(
-                                      alpha: 0.08,
-                                    ),
-                                    blurRadius: 28,
-                                    offset: const Offset(0, 14),
-                                  ),
-                                ],
+                      child: Container(
+                        constraints: const BoxConstraints(maxWidth: 1100),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(
+                            0xFFF2F7FD,
+                          ).withAlpha((0.86 * 255).toInt()),
+                          borderRadius: BorderRadius.circular(28),
+                          border: Border.all(color: ConnectionColors.border),
+                          boxShadow: [
+                            BoxShadow(
+                              color: ConnectionColors.primary.withAlpha(
+                                (0.08 * 255).toInt(),
                               ),
-                              child: isWide
-                                  ? Row(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Flexible(
-                                          flex: 5,
-                                          child: _contextPanel(controller),
-                                        ),
-                                        const SizedBox(width: 16),
-                                        Flexible(
-                                          flex: 6,
-                                          child: _buildFormPanel(
-                                            controller: controller,
-                                            isWide: true,
-                                          ),
-                                        ),
-                                      ],
-                                    )
-                                  : Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        _contextPanel(controller),
-                                        const SizedBox(height: 12),
-                                        _buildFormPanel(
-                                          controller: controller,
-                                          isWide: false,
-                                        ),
-                                      ],
-                                    ),
+                              blurRadius: 28,
+                              offset: const Offset(0, 14),
                             ),
-                          ),
+                          ],
+                        ),
+                        child: LayoutBuilder(
+                          builder: (context, constraints) {
+                            final isWide = constraints.maxWidth >= 920;
+                            return isWide
+                                ? Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Flexible(
+                                        flex: 5,
+                                        child: _buildContextPanel(controller),
+                                      ),
+                                      const SizedBox(width: 16),
+                                      Flexible(
+                                        flex: 6,
+                                        child: _buildFormPanel(
+                                          controller,
+                                          isWide: true,
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                : Column(
+                                    children: [
+                                      _buildContextPanel(controller),
+                                      const SizedBox(height: 12),
+                                      _buildFormPanel(
+                                        controller,
+                                        isWide: false,
+                                      ),
+                                    ],
+                                  );
+                          },
                         ),
                       ),
                     ),
-                  );
-                },
+                  ),
+                ),
               ),
             ),
           ],
@@ -202,14 +164,38 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  Widget _contextPanel(CraneController controller) {
-    final connectedDevice =
-        controller.connectionState.connectedDevice?.name ??
-        BLEConstants.deviceName;
-    final statusLabel = _statusTitle(controller.connectionState.status);
-    final statusCaption = _statusSubtitle(controller.connectionState.status);
-    final linkReady = _hasAuthenticationSession(controller);
+  Widget _buildBackgroundCircles() {
+    return Stack(
+      children: [
+        Positioned(
+          top: -120,
+          right: -90,
+          child: Container(
+            width: 280,
+            height: 280,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: ConnectionColors.scanning.withAlpha((0.08 * 255).toInt()),
+            ),
+          ),
+        ),
+        Positioned(
+          bottom: -120,
+          left: -100,
+          child: Container(
+            width: 300,
+            height: 300,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: ConnectionColors.primary.withAlpha((0.06 * 255).toInt()),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 
+  Widget _buildContextPanel(CraneController controller) {
     return Container(
       padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
@@ -227,27 +213,32 @@ class _LoginScreenState extends State<LoginScreen>
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(999),
-              color: Colors.white.withValues(alpha: 0.16),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+              color: Colors.white.withAlpha((0.16 * 255).toInt()),
+              border: Border.all(
+                color: Colors.white.withAlpha((0.18 * 255).toInt()),
+              ),
             ),
             child: const Text(
               'SECURE BLE LINK',
               style: TextStyle(
                 color: Colors.white,
-                fontSize: 11,
+                fontSize: 8,
                 letterSpacing: 1.1,
                 fontWeight: FontWeight.w800,
               ),
             ),
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 5),
           Center(
             child: _BeaconPulse(
               animation: _pulseController,
-              active: controller.isAuthenticating || linkReady,
+              active:
+                  controller.isAuthenticating ||
+                  controller.connectionState.status ==
+                      BleConnectionStatus.authenticated,
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 0),
           const Text(
             'Authenticate Operator Session',
             style: TextStyle(
@@ -260,63 +251,20 @@ class _LoginScreenState extends State<LoginScreen>
           Text(
             'Connection is established. Verify credentials before crane commands are enabled.',
             style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.88),
+              color: Colors.white.withAlpha((0.88 * 255).toInt()),
               fontSize: 13,
               height: 1.35,
             ),
           ),
-          const SizedBox(height: 16),
-          _ContextInfoPill(
-            icon: Icons.bluetooth_connected_rounded,
-            label: 'Connected device',
-            value: connectedDevice,
-          ),
-          const SizedBox(height: 8),
-          _ContextInfoPill(
-            icon: Icons.settings_ethernet_rounded,
-            label: 'Transport state',
-            value: statusLabel,
-          ),
-          const SizedBox(height: 8),
-          _ContextInfoPill(
-            icon: controller.isAuthenticating
-                ? Icons.sync_rounded
-                : Icons.radar_rounded,
-            label: 'Session',
-            value: statusCaption,
-          ),
-          // const SizedBox(height: 18),
-          // const _JourneyStep(
-          //   done: true,
-          //   active: false,
-          //   title: 'Scan and connect',
-          //   subtitle: 'Nearby PLC discovered and paired.',
-          // ),
-          // const SizedBox(height: 8),
-          // const _JourneyStep(
-          //   done: false,
-          //   active: true,
-          //   title: 'Authenticate operator',
-          //   subtitle: 'Confirm access credentials with PLC14.',
-          // ),
-          // const SizedBox(height: 8),
-          // const _JourneyStep(
-          //   done: false,
-          //   active: false,
-          //   title: 'Open controls',
-          //   subtitle: 'Control screen unlocks after success.',
-          // ),
         ],
       ),
     );
   }
 
-  Widget _buildFormPanel({
-    required CraneController controller,
-    required bool isWide,
-  }) {
+  Widget _buildFormPanel(CraneController controller, {required bool isWide}) {
     final authSessionReady = _hasAuthenticationSession(controller);
     final errorState = _resolveErrorState(controller.errorMessage);
+    final bool busy = controller.isAuthenticating || _biometricLoading;
 
     return Container(
       padding: EdgeInsets.all(isWide ? 26 : 20),
@@ -328,21 +276,6 @@ class _LoginScreenState extends State<LoginScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Operator Login',
-            style: TextStyle(
-              color: ConnectionColors.textPrimary,
-              fontSize: 28,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.4,
-            ),
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'Sign in to start a secure crane control session.',
-            style: TextStyle(color: ConnectionColors.textMuted, fontSize: 13.5),
-          ),
-          const SizedBox(height: 14),
           _buildLiveStatusBanner(controller),
           if (controller.isAuthenticating) ...[
             const SizedBox(height: 12),
@@ -362,18 +295,18 @@ class _LoginScreenState extends State<LoginScreen>
                     ),
                   ),
           ),
-          if (!authSessionReady) ...[
-            const SizedBox(height: 12),
-            _AuthErrorCard(
-              state: const _AuthErrorState(
-                title: 'Connection ended',
-                message:
-                    'The authentication link is no longer active. Return to scan and reconnect to PLC14.',
-                icon: Icons.bluetooth_disabled_rounded,
-              ),
-              onBackToScan: controller.disconnect,
-            ),
-          ],
+          // if (!authSessionReady && errorState == null) ...[
+          //   const SizedBox(height: 12),
+          //   _AuthErrorCard(
+          //     state: const _AuthErrorState(
+          //       title: 'Connection ended',
+          //       message:
+          //           'The authentication link is no longer active. Return to scan and reconnect to PLC14.',
+          //       icon: Icons.bluetooth_disabled_rounded,
+          //     ),
+          //     onBackToScan: controller.disconnect,
+          //   ),
+          // ],
           const SizedBox(height: 16),
           Form(
             key: _formKey,
@@ -383,14 +316,14 @@ class _LoginScreenState extends State<LoginScreen>
               children: [
                 TextFormField(
                   controller: _emailController,
-                  enabled: !controller.isAuthenticating,
+                  enabled: !busy,
                   keyboardType: TextInputType.emailAddress,
                   textInputAction: TextInputAction.next,
                   style: const TextStyle(
                     color: ConnectionColors.textPrimary,
                     fontSize: 14,
                   ),
-                  decoration: _inputDecoration(
+                  decoration: _buildInputDecoration(
                     label: 'Operator email',
                     hint: 'operator@company.com',
                     icon: Icons.alternate_email_rounded,
@@ -400,10 +333,7 @@ class _LoginScreenState extends State<LoginScreen>
                     if (candidate.isEmpty) {
                       return 'Email is required to authenticate with PLC14.';
                     }
-                    final validEmail = RegExp(
-                      r'^[^@\s]+@[^@\s]+\.[^@\s]+$',
-                    ).hasMatch(candidate);
-                    if (!validEmail) {
+                    if (!candidate.contains('@') || !candidate.contains('.')) {
                       return 'Enter a valid email format (example: user@domain.com).';
                     }
                     return null;
@@ -412,7 +342,7 @@ class _LoginScreenState extends State<LoginScreen>
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: _passwordController,
-                  enabled: !controller.isAuthenticating,
+                  enabled: !busy,
                   obscureText: _obscurePassword,
                   textInputAction: TextInputAction.done,
                   onFieldSubmitted: (_) => _submit(),
@@ -420,7 +350,7 @@ class _LoginScreenState extends State<LoginScreen>
                     color: ConnectionColors.textPrimary,
                     fontSize: 14,
                   ),
-                  decoration: _inputDecoration(
+                  decoration: _buildInputDecoration(
                     label: 'Password',
                     hint: 'Enter your password',
                     icon: Icons.lock_outline_rounded,
@@ -456,8 +386,8 @@ class _LoginScreenState extends State<LoginScreen>
                       child: Text(
                         'Remember credentials on this device',
                         style: TextStyle(
-                          color: ConnectionColors.textSecondary.withValues(
-                            alpha: 0.85,
+                          color: ConnectionColors.textSecondary.withAlpha(
+                            (0.85 * 255).toInt(),
                           ),
                           fontSize: 12.5,
                           fontWeight: FontWeight.w600,
@@ -467,10 +397,10 @@ class _LoginScreenState extends State<LoginScreen>
                     Switch.adaptive(
                       value: controller.rememberCredentials,
                       activeThumbColor: ConnectionColors.scanning,
-                      activeTrackColor: ConnectionColors.scanning.withValues(
-                        alpha: 0.35,
+                      activeTrackColor: ConnectionColors.scanning.withAlpha(
+                        (0.35 * 255).toInt(),
                       ),
-                      onChanged: controller.isAuthenticating
+                      onChanged: busy
                           ? null
                           : controller.setRememberCredentials,
                     ),
@@ -484,8 +414,8 @@ class _LoginScreenState extends State<LoginScreen>
             width: double.infinity,
             height: 52,
             child: FilledButton.icon(
-              onPressed: controller.isAuthenticating ? null : _submit,
-              icon: controller.isAuthenticating
+              onPressed: busy ? null : _submit,
+              icon: busy
                   ? const SizedBox(
                       width: 16,
                       height: 16,
@@ -496,9 +426,7 @@ class _LoginScreenState extends State<LoginScreen>
                     )
                   : const Icon(Icons.lock_open_rounded, size: 18),
               label: Text(
-                controller.isAuthenticating
-                    ? 'AUTHENTICATING...'
-                    : 'AUTHENTICATE SESSION',
+                busy ? 'AUTHENTICATING...' : 'AUTHENTICATE SESSION',
                 style: const TextStyle(
                   fontWeight: FontWeight.w800,
                   letterSpacing: 0.8,
@@ -515,45 +443,90 @@ class _LoginScreenState extends State<LoginScreen>
             ),
           ),
           const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: controller.isAuthenticating
-                      ? null
-                      : controller.disconnect,
-                  icon: const Icon(Icons.arrow_back_rounded, size: 16),
-                  label: const Text('Back to Scan'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: ConnectionColors.textSecondary,
-                    side: const BorderSide(color: ConnectionColors.border),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: busy ? null : controller.disconnect,
+              icon: const Icon(Icons.arrow_back_rounded, size: 16),
+              label: const Text('Back to Scan'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: ConnectionColors.textSecondary,
+                side: const BorderSide(color: ConnectionColors.border),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ),
+          if (_biometricLoginVisible(controller)) ...[
+            const SizedBox(height: 14),
+            const Row(
+              children: [
+                Expanded(child: Divider(color: ConnectionColors.border)),
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 14),
+                  child: Text(
+                    'OR',
+                    style: TextStyle(
+                      color: ConnectionColors.textMuted,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.0,
                     ),
                   ),
                 ),
+                Expanded(child: Divider(color: ConnectionColors.border)),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (_lastBiometricResult != null &&
+                !_lastBiometricResult!.isSuccess &&
+                !_lastBiometricResult!.isCancelled)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _AuthErrorCard(
+                  state: _resolveBiometricError(_lastBiometricResult!),
+                ),
               ),
-              // const SizedBox(width: 8),
-              // Expanded(
-              //   child: TextButton.icon(
-              //     onPressed: controller.isAuthenticating
-              //         ? null
-              //         : _showDefaultCredentials,
-              //     icon: const Icon(Icons.admin_panel_settings_outlined, size: 16),
-              //     label: const Text('Default Login'),
-              //     style: TextButton.styleFrom(
-              //       foregroundColor: ConnectionColors.primary,
-              //       padding: const EdgeInsets.symmetric(vertical: 12),
-              //       shape: RoundedRectangleBorder(
-              //         borderRadius: BorderRadius.circular(12),
-              //         side: const BorderSide(color: ConnectionColors.primarySoft),
-              //       ),
-              //     ),
-              //   ),
-              // ),
-            ],
-          ),
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: OutlinedButton.icon(
+                onPressed: busy ? null : _submitWithBiometrics,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: ConnectionColors.primary,
+                  side: const BorderSide(
+                    color: ConnectionColors.border,
+                    width: 1.5,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                icon: _biometricLoading
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.2,
+                          color: ConnectionColors.primary,
+                        ),
+                      )
+                    : const Icon(Icons.fingerprint, size: 22),
+                label: Text(
+                  _biometricLoading
+                      ? 'VERIFYING IDENTITY...'
+                      : 'BIOMETRIC LOGIN',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
+                    fontSize: 13.5,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -562,29 +535,33 @@ class _LoginScreenState extends State<LoginScreen>
   Widget _buildLiveStatusBanner(CraneController controller) {
     final status = controller.connectionState.status;
     final bool busy = controller.isAuthenticating;
-    final Color tone = switch (status) {
-      BleConnectionStatus.awaitingAuthentication ||
-      BleConnectionStatus.authenticating => ConnectionColors.scanning,
-      BleConnectionStatus.error => ConnectionColors.error,
-      _ => ConnectionColors.neutral,
-    };
-    final String message = switch (status) {
-      BleConnectionStatus.awaitingAuthentication =>
+
+    final (Color tone, String message) = switch (status) {
+      BleConnectionStatus.awaitingAuthentication => (
+        ConnectionColors.scanning,
         'Connected and waiting for credentials.',
-      BleConnectionStatus.authenticating =>
+      ),
+      BleConnectionStatus.authenticating => (
+        ConnectionColors.scanning,
         'Credentials are being verified by PLC14.',
-      BleConnectionStatus.error =>
+      ),
+      BleConnectionStatus.error => (
+        ConnectionColors.error,
         'Authentication needs attention before continuing.',
-      _ => 'Return to scanning if connection is unavailable.',
+      ),
+      _ => (
+        ConnectionColors.neutral,
+        'Return to scanning if connection is unavailable.',
+      ),
     };
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: tone.withValues(alpha: 0.08),
+        color: tone.withAlpha((0.08 * 255).toInt()),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: tone.withValues(alpha: 0.22)),
+        border: Border.all(color: tone.withAlpha((0.22 * 255).toInt())),
       ),
       child: Row(
         children: [
@@ -612,7 +589,7 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  InputDecoration _inputDecoration({
+  InputDecoration _buildInputDecoration({
     required String label,
     required String hint,
     required IconData icon,
@@ -659,38 +636,31 @@ class _LoginScreenState extends State<LoginScreen>
     final hasDevice = controller.connectionState.connectedDevice != null;
     return status == BleConnectionStatus.awaitingAuthentication ||
         status == BleConnectionStatus.authenticating ||
-        (status == BleConnectionStatus.error && hasDevice);
-  }
-
-  String _statusTitle(BleConnectionStatus status) {
-    return switch (status) {
-      BleConnectionStatus.awaitingAuthentication => 'READY',
-      BleConnectionStatus.authenticating => 'AUTHENTICATING',
-      BleConnectionStatus.error => 'RETRY REQUIRED',
-      _ => 'PENDING',
-    };
-  }
-
-  String _statusSubtitle(BleConnectionStatus status) {
-    return switch (status) {
-      BleConnectionStatus.awaitingAuthentication =>
-        'Waiting for operator credentials',
-      BleConnectionStatus.authenticating => 'Handshake in progress',
-      BleConnectionStatus.error => 'Action required',
-      _ => 'Link state unavailable',
-    };
+        (status == BleConnectionStatus.error && hasDevice) ||
+        controller.hasPendingEnrollmentOffer;
   }
 
   _AuthErrorState? _resolveErrorState(String? message) {
-    if (message == null || message.trim().isEmpty) {
-      return null;
-    }
+    if (message == null || message.trim().isEmpty) return null;
 
     final raw = message.trim();
     final normalized = raw.toLowerCase();
 
-    if (raw == BLEConstants.authFailed ||
-        normalized.contains('credentials were rejected')) {
+    if (raw == BLEConstants.authUntrusted ||
+        normalized.contains('device not authorized') ||
+        normalized.contains('not registered')) {
+      return const _AuthErrorState(
+        title: 'Device Not Authorized',
+        message:
+            'This device is not in the PLC trusted-device registry. '
+            'Open Device Settings to copy your Device ID and provide it '
+            'to your system administrator for registration.',
+        icon: Icons.block_rounded,
+        isTrustRejection: true,
+      );
+    }
+
+    if (normalized.contains('credentials were rejected')) {
       return const _AuthErrorState(
         title: 'Invalid credentials',
         message:
@@ -699,22 +669,21 @@ class _LoginScreenState extends State<LoginScreen>
       );
     }
 
-    if (raw == BLEConstants.authTimeout || normalized.contains('timed out')) {
+    if (normalized.contains('timed out') || normalized.contains('timeout')) {
       return const _AuthErrorState(
         title: 'Authentication timeout',
         message:
-            'PLC14 or User did not respond in time. Stay close to the device and retry.',
+            'The PLC did not respond in time. Stay close to the device and retry.',
         icon: Icons.timer_off_rounded,
       );
     }
 
-    if (normalized.contains('not ready') ||
-        normalized.contains('connection') ||
+    if (normalized.contains('connection') ||
         normalized.contains('disconnect')) {
       return const _AuthErrorState(
         title: 'Connection issue',
         message:
-            'The BLE session became unstable during login. Return to scan and reconnect.',
+            'The BLE session became unstable. Return to scan and reconnect.',
         icon: Icons.bluetooth_disabled_rounded,
       );
     }
@@ -732,31 +701,161 @@ class _LoginScreenState extends State<LoginScreen>
       _autovalidateMode = AutovalidateMode.onUserInteraction;
     });
 
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
+    if (!_formKey.currentState!.validate()) return;
 
     final controller = context.read<CraneController>();
     if (!_hasAuthenticationSession(controller)) {
-      _showSnack(
-        'Connection session ended. Return to scan and reconnect before retrying.',
-      );
+      _showSnack('Connection session ended. Return to scan and reconnect.');
       return;
     }
+
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
 
     final success = await controller.authenticate(
-      email: _emailController.text.trim(),
-      password: _passwordController.text,
+      email: email,
+      password: password,
     );
 
-    if (!mounted || success) {
+    if (!mounted) return;
+
+    if (success) {
+      if (controller.hasPendingEnrollmentOffer) {
+        await _offerBiometricEnrollment(
+          email: email,
+          password: password,
+          controller: controller,
+        );
+      }
+      if (mounted) {
+        context.read<CraneController>().completePendingEnrollmentOffer();
+      }
+      return;
+    }
+    // Auth failure is already surfaced inline via _AuthErrorCard.
+    // No additional snackbar is needed.
+  }
+
+  bool _biometricLoginVisible(CraneController controller) {
+    return controller.isBiometricAvailable &&
+        controller.isBiometricEnrolled &&
+        _hasAuthenticationSession(controller);
+  }
+
+  Future<void> _submitWithBiometrics() async {
+    if (_biometricLoading || !mounted) return;
+
+    final controller = context.read<CraneController>();
+    if (!_hasAuthenticationSession(controller)) {
+      _showSnack('Connection session ended. Return to scan and reconnect.');
       return;
     }
 
-    final resolved = _resolveErrorState(controller.errorMessage);
-    if (resolved != null) {
-      _showSnack('${resolved.title}: ${resolved.message}');
+    setState(() {
+      _biometricLoading = true;
+      _lastBiometricResult = null;
+    });
+
+    final result = await controller.authenticateWithBiometrics();
+
+    if (!mounted) return;
+
+    setState(() {
+      _biometricLoading = false;
+      if (!result.isSuccess && !result.isCancelled) {
+        _lastBiometricResult = result;
+      }
+    });
+  }
+
+  Future<void> _offerBiometricEnrollment({
+    required String email,
+    required String password,
+    required CraneController controller,
+  }) async {
+    if (!mounted) return;
+    if (!controller.isBiometricAvailable || controller.isBiometricEnrolled) {
+      return;
     }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => const _BiometricEnrollmentDialog(),
+    );
+
+    if (!mounted || confirmed != true) return;
+
+    final ctrl = context.read<CraneController>();
+    final enrolled = await ctrl.enrollBiometrics(
+      email: email,
+      password: password,
+    );
+
+    if (mounted && enrolled) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.all(16),
+          duration: const Duration(seconds: 3),
+          backgroundColor: ConnectionColors.connected,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          content: const Row(
+            children: [
+              Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Fingerprint login enabled for this device.',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+  }
+
+  _AuthErrorState _resolveBiometricError(BiometricAuthResult result) {
+    return switch (result.status) {
+      BiometricAuthStatus.failure => const _AuthErrorState(
+        title: 'PLC authentication failed',
+        message:
+            'PLC rejected stored credentials. Log in manually to re-enrol.',
+        icon: Icons.lock_person_rounded,
+      ),
+      BiometricAuthStatus.lockedOut => const _AuthErrorState(
+        title: 'Biometric temporarily locked',
+        message: 'Too many failed attempts. Wait briefly, then retry.',
+        icon: Icons.lock_clock_rounded,
+      ),
+      BiometricAuthStatus.permanentlyLockedOut => const _AuthErrorState(
+        title: 'Biometric permanently locked',
+        message: 'Unlock your device with PIN to reset biometrics.',
+        icon: Icons.lock_outline_rounded,
+      ),
+      BiometricAuthStatus.notEnrolled => const _AuthErrorState(
+        title: 'No fingerprints enrolled',
+        message: 'Configure fingerprint in device security settings.',
+        icon: Icons.fingerprint,
+      ),
+      BiometricAuthStatus.credentialsMissing => const _AuthErrorState(
+        title: 'Credentials not found',
+        message: 'Stored credentials were cleared. Log in manually.',
+        icon: Icons.key_off_rounded,
+      ),
+      _ => _AuthErrorState(
+        title: 'Biometric error',
+        message: result.message ?? 'An unexpected error occurred.',
+        icon: Icons.error_outline_rounded,
+      ),
+    };
   }
 
   void _showSnack(String message) {
@@ -781,6 +880,10 @@ class _LoginScreenState extends State<LoginScreen>
       );
   }
 }
+
+// ============================================================================
+// Supporting Widgets
+// ============================================================================
 
 class _BeaconPulse extends StatelessWidget {
   const _BeaconPulse({required this.animation, required this.active});
@@ -811,8 +914,8 @@ class _BeaconPulse extends StatelessWidget {
                   height: 82,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: Colors.white.withValues(
-                      alpha: waveOpacity.clamp(0.05, 0.42).toDouble(),
+                    color: Colors.white.withAlpha(
+                      (waveOpacity.clamp(0.05, 0.42) * 255).toInt(),
                     ),
                   ),
                 ),
@@ -825,7 +928,7 @@ class _BeaconPulse extends StatelessWidget {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.3),
+                      color: Colors.white.withAlpha((0.3 * 255).toInt()),
                     ),
                   ),
                 ),
@@ -840,7 +943,7 @@ class _BeaconPulse extends StatelessWidget {
         height: 72,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: Colors.white.withValues(alpha: 0.96),
+          color: Colors.white.withAlpha((0.96 * 255).toInt()),
         ),
         child: const Icon(
           Icons.bluetooth_searching_rounded,
@@ -848,139 +951,6 @@ class _BeaconPulse extends StatelessWidget {
           size: 34,
         ),
       ),
-    );
-  }
-}
-
-class _ContextInfoPill extends StatelessWidget {
-  const _ContextInfoPill({
-    required this.icon,
-    required this.label,
-    required this.value,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        color: Colors.white.withValues(alpha: 0.14),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 16, color: Colors.white),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.82),
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          Flexible(
-            child: Text(
-              value,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.right,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 12.5,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.2,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ignore: unused_element
-class _JourneyStep extends StatelessWidget {
-  const _JourneyStep({
-    required this.done,
-    required this.active,
-    required this.title,
-    required this.subtitle,
-  });
-
-  final bool done;
-  final bool active;
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    final Color iconColor = done || active
-        ? Colors.white
-        : Colors.white.withValues(alpha: 0.55);
-    final Color bubbleColor = done
-        ? Colors.white.withValues(alpha: 0.26)
-        : active
-        ? Colors.white.withValues(alpha: 0.22)
-        : Colors.white.withValues(alpha: 0.1);
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 24,
-          height: 24,
-          decoration: BoxDecoration(
-            color: bubbleColor,
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white.withValues(alpha: 0.35)),
-          ),
-          child: Icon(
-            done
-                ? Icons.check_rounded
-                : active
-                ? Icons.adjust_rounded
-                : Icons.circle_outlined,
-            color: iconColor,
-            size: 14,
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: TextStyle(
-                  color: Colors.white.withValues(
-                    alpha: done || active ? 0.98 : 0.7,
-                  ),
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12.5,
-                ),
-              ),
-              const SizedBox(height: 1),
-              Text(
-                subtitle,
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.74),
-                  fontSize: 11.5,
-                  height: 1.25,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
     );
   }
 }
@@ -1037,11 +1007,13 @@ class _AuthErrorState {
     required this.title,
     required this.message,
     required this.icon,
+    this.isTrustRejection = false,
   });
 
   final String title;
   final String message;
   final IconData icon;
+  final bool isTrustRejection;
 }
 
 class _AuthErrorCard extends StatelessWidget {
@@ -1089,12 +1061,40 @@ class _AuthErrorCard extends StatelessWidget {
               height: 1.3,
             ),
           ),
-          if (onRetry != null || onBackToScan != null) ...[
+          if (onRetry != null ||
+              onBackToScan != null ||
+              state.isTrustRejection) ...[
             const SizedBox(height: 10),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
+                if (state.isTrustRejection)
+                  OutlinedButton.icon(
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const SettingsScreen(),
+                      ),
+                    ),
+                    icon: const Icon(Icons.settings_rounded, size: 14),
+                    label: const Text('Open Device Settings'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: ConnectionColors.error,
+                      side: const BorderSide(
+                        color: ConnectionColors.errorBorder,
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      textStyle: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      minimumSize: Size.zero,
+                    ),
+                  ),
                 if (onRetry != null)
                   FilledButton.icon(
                     onPressed: onRetry,
@@ -1115,33 +1115,95 @@ class _AuthErrorCard extends StatelessWidget {
                       minimumSize: Size.zero,
                     ),
                   ),
-                // if (onBackToScan != null)
-                //   OutlinedButton.icon(
-                //     onPressed: onBackToScan,
-                //     icon: const Icon(Icons.bluetooth_searching_rounded, size: 14),
-                //     label: const Text('Back to scan'),
-                //     style: OutlinedButton.styleFrom(
-                //       foregroundColor: ConnectionColors.error,
-                //       side: BorderSide(
-                //         color: ConnectionColors.error.withValues(alpha: 0.35),
-                //       ),
-                //       padding: const EdgeInsets.symmetric(
-                //         horizontal: 12,
-                //         vertical: 10,
-                //       ),
-                //       textStyle: const TextStyle(
-                //         fontSize: 12,
-                //         fontWeight: FontWeight.w700,
-                //       ),
-                //       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                //       minimumSize: Size.zero,
-                //     ),
-                //   ),
               ],
             ),
           ],
         ],
       ),
+    );
+  }
+}
+
+class _BiometricEnrollmentDialog extends StatelessWidget {
+  const _BiometricEnrollmentDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: ConnectionColors.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+      contentPadding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+      actionsPadding: const EdgeInsets.fromLTRB(12, 8, 12, 14),
+      title: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(9),
+            decoration: BoxDecoration(
+              color: ConnectionColors.primarySoft,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.fingerprint,
+              color: ConnectionColors.primary,
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text(
+              'Enable Fingerprint Login',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+                color: ConnectionColors.textPrimary,
+                height: 1.2,
+              ),
+            ),
+          ),
+        ],
+      ),
+      content: const Text(
+        'Access this device faster next session using your fingerprint or '
+        'face ID — no need to re-enter your credentials.\n\n'
+        "Your operator credentials are stored in this device's hardware "
+        'keystore and are never transmitted over the network.',
+        style: TextStyle(
+          color: ConnectionColors.textSecondary,
+          fontSize: 13.5,
+          height: 1.45,
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          style: TextButton.styleFrom(
+            foregroundColor: ConnectionColors.textMuted,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+          child: const Text(
+            'NOT NOW',
+            style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: 0.5),
+          ),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          style: FilledButton.styleFrom(
+            backgroundColor: ConnectionColors.primary,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+          ),
+          child: const Text(
+            'ENABLE',
+            style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 0.5),
+          ),
+        ),
+      ],
     );
   }
 }

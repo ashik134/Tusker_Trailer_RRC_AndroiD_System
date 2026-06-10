@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import 'package:tusker_trailer_rrc/controllers/crane_controllers.dart';
 import 'package:tusker_trailer_rrc/startup/app_startup_initializer.dart';
+import 'package:tusker_trailer_rrc/utils/constants.dart';
 
 class StartupSplashScreen extends StatefulWidget {
   const StartupSplashScreen({required this.destinationBuilder, super.key});
@@ -18,9 +19,6 @@ class StartupSplashScreen extends StatefulWidget {
 
 class _StartupSplashScreenState extends State<StartupSplashScreen>
     with SingleTickerProviderStateMixin {
-  static const Color _background = Colors.white;
-  // static const Color _textPrimary = Color(0xFF2E3180);
-  static const Color _textSecondary = Color(0xFF5C6470);
   static const Duration _minimumVisible = Duration(seconds: 3);
 
   late final AnimationController _introController;
@@ -132,7 +130,7 @@ class _StartupSplashScreenState extends State<StartupSplashScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _background,
+      backgroundColor: Colors.white,
       body: Center(
         child: FadeTransition(
           opacity: _fadeAnimation,
@@ -154,23 +152,13 @@ class _StartupSplashScreenState extends State<StartupSplashScreen>
                         fit: BoxFit.cover,
                       ),
                     ),
-                    // const SizedBox(height: 28),
-                    // const Text(
-                    //   'INTELLICONTROL',
-                    //   textAlign: TextAlign.center,
-                    //   style: TextStyle(
-                    //     color: _textPrimary,
-                    //     fontSize: 24,
-                    //     fontWeight: FontWeight.w800,
-                    //     letterSpacing: 2.4,
-                    //   ),
-                    // ),
+
                     const SizedBox(height: 8),
                     const Text(
-                      'Industrial Crane Control System',
+                      'Trailer Remote Control System',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: _textSecondary,
+                        color: AppColors.textSecondary,
                         fontSize: 13.5,
                         fontWeight: FontWeight.w500,
                         letterSpacing: 0.2,

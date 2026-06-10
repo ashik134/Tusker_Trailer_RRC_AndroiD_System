@@ -115,15 +115,12 @@ class _CraneSliderButtonState extends State<CraneSliderButton>
     switch (newState) {
       case ControlState.idle:
         Vibration.vibrate(duration: 15);
-        debugPrint("${widget.label} command: IDLE");
         break;
       case ControlState.slow:
         Vibration.vibrate(duration: 25, amplitude: 100);
-        debugPrint("${widget.label} command: SLOW");
         break;
       case ControlState.fast:
         Vibration.vibrate(duration: 55, amplitude: 255);
-        debugPrint("${widget.label} command: FAST");
         break;
     }
   }
@@ -138,16 +135,11 @@ class _CraneSliderButtonState extends State<CraneSliderButton>
 
     final newState = _getStateFromSlider(value);
     _emitCommand(newState);
-
-    debugPrint(
-      "${widget.label} slider: ${(value * 100).toStringAsFixed(1)}% - ${newState.name}",
-    );
   }
 
   void _onSliderChangeStart(double value) {
     if (widget.isDisabled) return;
     _isTouching = true;
-    debugPrint("Slider touch started: ${widget.label}");
   }
 
   void _onSliderChangeEnd(double value) {
@@ -157,7 +149,6 @@ class _CraneSliderButtonState extends State<CraneSliderButton>
     });
     _emitCommand(ControlState.idle);
     _pulsecontroller.forward(from: 0.0);
-    debugPrint("Slider released: ${widget.label}");
   }
 
   Color get _primaryColor {
