@@ -331,18 +331,18 @@ class ConnectedDeviceCard extends StatelessWidget {
                     ],
                   ),
                   // rotating during cancellation to signal the abort
-                  isAnimating: isCancelling,
+                  isAnimating: !isCancelling,
                 ),
               ),
             ],
           ),
 
-          const SizedBox(height: 4),
+          const SizedBox(height: 0),
 
           ///////////////////////////
           _RSSIBar(rssi: device.rssi),
 
-          const SizedBox(height: 4),
+          const SizedBox(height: 0),
 
           ///////////////////////////
           SizedBox(
@@ -462,8 +462,8 @@ class _RSSIBar extends StatelessWidget {
       builder: (context, constraints) {
         final w = constraints.maxWidth;
         final iconSize = (w * 0.07).clamp(14.0, 22.0);
-        final containerSize = (w * 0.11).clamp(22.0, 34.0);
-        final fontSize = (w * 0.028).clamp(9.0, 12.0);
+        final containerSize = (w * 0.11).clamp(20.0, 30.0);
+        final fontSize = (w * 0.028).clamp(8.0, 10.0);
 
         return Container(
           padding: EdgeInsets.symmetric(
