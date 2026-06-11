@@ -262,6 +262,7 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Widget _buildFormPanel(CraneController controller, {required bool isWide}) {
+    // ignore: unused_local_variable
     final authSessionReady = _hasAuthenticationSession(controller);
     final errorState = _resolveErrorState(controller.errorMessage);
     final bool busy = controller.isAuthenticating || _biometricLoading;

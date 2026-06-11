@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Dark industrial palette (Control Screen, Settings Screen, etc.)
+// Dark industrial palette 
 // ─────────────────────────────────────────────────────────────────────────────
 
 class AppColors {

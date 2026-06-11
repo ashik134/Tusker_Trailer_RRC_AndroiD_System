@@ -1,7 +1,4 @@
-// App navigation
 enum AppScreen { connection, authentication, control }
-
-// Moton state
 
 enum HoistState { idle, upSlow, upFast, downSlow, downFast }
 
@@ -34,8 +31,6 @@ enum PlcType {
     }
   }
 }
-
-// Permissions
 
 class PermissionState {
   const PermissionState({
